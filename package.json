@@ -32,5 +32,24 @@
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "author": "Code4Bug",
+  "homepage": "https://github.com/Code4Bug/jarvis#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Code4Bug/jarvis.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Code4Bug/jarvis/issues"
+  },
+  "keywords": [
+    "cli",
+    "agent",
+    "ai",
+    "chatbot",
+    "ink",
+    "react",
+    "typescript",
+    "terminal"
+  ]
 }
