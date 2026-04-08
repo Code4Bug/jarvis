@@ -10,7 +10,7 @@
  * 否则回退为返回 skill 指令文本（由 LLM 解释执行）。
  */
 
-import { execSync } from 'child_process';
+import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { Tool } from '../types/index.js';
@@ -128,20 +128,28 @@ async function executeSkillScript(
 
   try {
     fs.writeFileSync(tmpFile, pyCode, 'utf-8');
-    const output = execSync(`python3 ${JSON.stringify(tmpFile)}`, {
-      encoding: 'utf-8',
-      timeout: 30000,
-      maxBuffer: 1024 * 1024,
-      env: { ...process.env },
-      cwd: skill.dirPath,
+    const output = await new Promise<string>((resolve, reject) => {
+      exec(`python3 ${JSON.stringify(tmpFile)}`, {
+        encoding: 'utf-8',
+        timeout: 30000,
+        maxBuffer: 1024 * 1024,
+        env: { ...process.env },
+        cwd: skill.dirPath,
+      }, (error, stdout, stderr) => {
+        if (error) {
+          const parts: string[] = [];
+          if (stderr) parts.push(String(stderr).trim());
+          if (stdout) parts.push(String(stdout).trim());
+          if (parts.length === 0) parts.push(error.message);
+          reject(new Error(parts.join('\n')));
+          return;
+        }
+        resolve(String(stdout).trim());
+      });
     });
-    return output.trim() || '(skill 执行完成，无输出)';
+    return output || '(skill 执行完成，无输出)';
   } catch (e: any) {
-    const parts: string[] = [];
-    if (e.stderr) parts.push(String(e.stderr).trim());
-    if (e.stdout) parts.push(String(e.stdout).trim());
-    if (parts.length === 0) parts.push(e.message);
-    return `[Skill ${skill.meta.name} 执行失败]\n${parts.join('\n')}`;
+    return `[Skill ${skill.meta.name} 执行失败]\n${e.message}`;
   } finally {
     // 清理临时文件
     try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }

@@ -17,7 +17,7 @@ function tokenProgressBar(used: number, limit: number, barWidth: number): { bar:
   return { bar, color };
 }
 
-export default function StatusBar({ width, totalTokens }: StatusBarProps) {
+function StatusBar({ width, totalTokens }: StatusBarProps) {
   const left = ` ${MODEL_NAME} │ ${PROJECT_NAME}`;
 
   // 右侧：token 进度条 + 思考模式切换（可选）
@@ -40,3 +40,5 @@ export default function StatusBar({ width, totalTokens }: StatusBarProps) {
     </Box>
   );
 }
+
+export default React.memo(StatusBar);

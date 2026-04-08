@@ -205,7 +205,6 @@ async function runOneIteration(
       tokenCount,
       firstTokenLatency,
       tokensPerSecond,
-      think: accumulatedThinking || undefined,
       ...(isAborted ? { abortHint: '推理已中断（ESC）' } : {}),
     });
   }

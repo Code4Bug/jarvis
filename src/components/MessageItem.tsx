@@ -76,7 +76,7 @@ function MessageItem({ msg, showDetails = false }: { msg: Message; showDetails?:
     return (
       <Box flexDirection="column" marginBottom={0}>
         <Box>
-          <Text color="cyan">{'▸'} </Text>
+          <Text color="cyan">{'○'} </Text>
           <Text color="gray">Thinking</Text>
           <Text color="gray" dimColor> ({msg.think.length} chars)</Text>
           {!showDetails && <Text color="gray" dimColor>  [Ctrl+O 展开]</Text>}
@@ -135,14 +135,6 @@ function MessageItem({ msg, showDetails = false }: { msg: Message; showDetails?:
   if (msg.type === 'reasoning') {
     return (
       <Box flexDirection="column" marginBottom={1}>
-        {showDetails && msg.think && (
-          <Box marginLeft={2} flexDirection="column" marginBottom={0}>
-            <Text color="cyan">{'▸'} <Text color="gray">Thinking ({msg.think.length} chars)</Text></Text>
-            <Box marginLeft={2}>
-              <Text color="gray" dimColor wrap="wrap">{msg.think}</Text>
-            </Box>
-          </Box>
-        )}
         <Box>
           <Text color={dotColor}>{dot}</Text>
           <Box marginLeft={1}>

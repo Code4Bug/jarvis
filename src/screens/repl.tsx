@@ -65,13 +65,12 @@ function useDoubleCtrlCExit(exit: () => void) {
   return { countdown, handleCtrlC };
 }
 
-/** 响应式终端宽度，resize 时清屏防止残留 */
+/** 响应式终端宽度 */
 function useTerminalWidth(): number {
   const [width, setWidth] = useState(() => process.stdout.columns || 80);
 
   useEffect(() => {
     const onResize = () => {
-      process.stdout.write('\x1Bc');
       setWidth(process.stdout.columns || 80);
     };
     process.stdout.on('resize', onResize);
@@ -97,7 +96,7 @@ export default function REPL() {
   const STREAM_FLUSH_INTERVAL = 80; // ms
   const [loopState, setLoopState] = useState<LoopState | null>(null);
   const [showWelcome, setShowWelcome] = useState(true);
-  const [session, setSession] = useState<Session>({
+  const sessionRef = useRef<Session>({
     id: '', messages: [], createdAt: 0, updatedAt: 0, totalTokens: 0, totalCost: 0,
   });
   const [showDetails, setShowDetails] = useState(false);
@@ -132,7 +131,7 @@ export default function REPL() {
 
   useEffect(() => {
     engineRef.current = new QueryEngine();
-    setSession(engineRef.current.getSession());
+    sessionRef.current = engineRef.current.getSession();
     // 异步生成符合当前角色的输入提示
     generateAgentHint().then((hint) => setPlaceholder(hint)).catch((err) => {
       console.error('[hint] 初始化提示失败:', err);
@@ -218,9 +217,9 @@ export default function REPL() {
       }
     },
     onSessionUpdate: (s) => {
-      // 仅更新 ref 中的 token 计数，不触发 re-render（由定时器驱动）
+      // 会话对象本身不参与当前界面渲染，保留在 ref 中避免每个 chunk 触发整页重绘
+      sessionRef.current = s;
       tokenCountRef.current = s.totalTokens;
-      setSession({ ...s });
     },
     onConfirmDangerousCommand: (command, reason, ruleName) => {
       return new Promise<DangerConfirmResult>((resolve) => {
@@ -249,7 +248,7 @@ export default function REPL() {
         // 新会话：重置引擎 + 清空所有状态
         if (engineRef.current) {
           engineRef.current.reset();
-          setSession(engineRef.current.getSession());
+          sessionRef.current = engineRef.current.getSession();
         }
         setMessages([]);
         setStreamText('');
@@ -460,7 +459,7 @@ export default function REPL() {
             const result = engineRef.current.loadSession(sessionId);
             if (result) {
               setMessages(result.messages);
-              setSession(result.session);
+              sessionRef.current = result.session;
               tokenCountRef.current = result.session.totalTokens;
               setDisplayTokens(result.session.totalTokens);
               setStreamText('');
@@ -680,7 +679,7 @@ export default function REPL() {
         const result = engineRef.current.loadSession(cmd.name);
         if (result) {
           setMessages(result.messages);
-          setSession(result.session);
+          sessionRef.current = result.session;
           tokenCountRef.current = result.session.totalTokens;
           setDisplayTokens(result.session.totalTokens);
           setStreamText('');
@@ -779,7 +778,7 @@ export default function REPL() {
     if (key.ctrl && ch === 'l') {
       if (engineRef.current) {
         engineRef.current.reset();
-        setSession(engineRef.current.getSession());
+        sessionRef.current = engineRef.current.getSession();
       }
       setMessages([]);
       setStreamText('');

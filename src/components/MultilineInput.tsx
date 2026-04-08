@@ -375,6 +375,9 @@ export default function MultilineInput({
       // Ctrl+C → 不拦截，让上层 useInput 处理双击退出
       if (raw === '\x03') return;
 
+      // Ctrl+O → 不拦截，让上层 useInput 处理详情展开/折叠
+      if (raw === '\x0F') return;
+
       // Ctrl+L → 拦截，不穿透到终端（避免清屏）
       if (raw === '\x0C') return;
 

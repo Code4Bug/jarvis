@@ -18,7 +18,7 @@ const LOGO_LINES = [
 ];
 const LOGO_COLORS: Array<string> = ['cyan', 'cyan', 'blueBright', 'blueBright', 'magenta', 'magenta'];
 
-export default function WelcomeHeader({ width }: { width: number }) {
+function WelcomeHeader({ width }: { width: number }) {
   const maxPath = Math.max(width - 10, 20);
   const showLogo = width >= 52;
 
@@ -35,9 +35,9 @@ export default function WelcomeHeader({ width }: { width: number }) {
 
       {/* 标语 */}
       <Box marginTop={0}>
-        <Text color="gray">~ </Text>
+        <Text color="gray"></Text>
         <Text color="white" bold>Your AI-Powered Dev Companion</Text>
-        <Text color="gray"> ~</Text>
+        <Text color="gray"></Text>
       </Box>
 
       {/* 分隔线 */}
@@ -77,3 +77,5 @@ export default function WelcomeHeader({ width }: { width: number }) {
     </Box>
   );
 }
+
+export default React.memo(WelcomeHeader);

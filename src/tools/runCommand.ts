@@ -1,6 +1,29 @@
-import { execSync } from 'child_process';
+import { exec } from 'child_process';
 import { Tool } from '../types/index.js';
 import { sanitizeOutput } from '../core/safeguard.js';
+
+/**
+ * 异步执行命令，不阻塞事件循环，保证 TUI 渲染正常
+ */
+function execAsync(
+  command: string,
+  options: { encoding: BufferEncoding; timeout: number; maxBuffer: number; env: NodeJS.ProcessEnv },
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    exec(command, options, (error, stdout, stderr) => {
+      if (error) {
+        const parts: string[] = [];
+        if (stderr) parts.push(`[stderr] ${sanitizeOutput(String(stderr).trim())}`);
+        if (stdout) parts.push(`[stdout] ${sanitizeOutput(String(stdout).trim())}`);
+        if (error.code != null) parts.push(`[exit code] ${error.code}`);
+        if (parts.length === 0) parts.push(error.message);
+        reject(new Error(`命令执行失败:\n${parts.join('\n')}`));
+        return;
+      }
+      resolve(sanitizeOutput(String(stdout).trim()) || '(命令执行完成，无输出)');
+    });
+  });
+}
 
 export const runCommand: Tool = {
   name: 'Bash',
@@ -11,22 +34,12 @@ export const runCommand: Tool = {
   execute: async (args) => {
     const command = args.command as string;
     // 安全围栏拦截已在 query 层（executeTool）统一处理，此处仅负责执行 + 脱敏
-    try {
-      const output = execSync(command, {
-        encoding: 'utf-8',
-        timeout: 30000,
-        maxBuffer: 1024 * 1024,
-        env: sanitizeEnv(process.env),
-      });
-      return sanitizeOutput(output.trim()) || '(命令执行完成，无输出)';
-    } catch (e: any) {
-      const parts: string[] = [];
-      if (e.stderr) parts.push(`[stderr] ${sanitizeOutput(String(e.stderr).trim())}`);
-      if (e.stdout) parts.push(`[stdout] ${sanitizeOutput(String(e.stdout).trim())}`);
-      if (e.status != null) parts.push(`[exit code] ${e.status}`);
-      if (parts.length === 0) parts.push(e.message);
-      throw new Error(`命令执行失败:\n${parts.join('\n')}`);
-    }
+    return execAsync(command, {
+      encoding: 'utf-8',
+      timeout: 30000,
+      maxBuffer: 1024 * 1024,
+      env: sanitizeEnv(process.env),
+    });
   },
 };
 

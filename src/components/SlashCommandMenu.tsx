@@ -27,7 +27,7 @@ const categoryLabel: Record<string, string> = {
  *
  * 显示在输入框上方，支持滚动窗口。
  */
-export default function SlashCommandMenu({
+function SlashCommandMenu({
   commands,
   selectedIndex,
   maxVisible = 6,
@@ -81,3 +81,5 @@ export default function SlashCommandMenu({
     </Box>
   );
 }
+
+export default React.memo(SlashCommandMenu);
