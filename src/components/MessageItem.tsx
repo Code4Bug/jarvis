@@ -96,6 +96,12 @@ function MessageItem({ msg, showDetails = false }: { msg: Message; showDetails?:
     // Bash 工具直接显示命令内容
     const isBash = msg.toolName === 'Bash';
     const bashCmd = isBash && msg.toolArgs?.command ? String(msg.toolArgs.command) : '';
+    // Skill 工具：skill_xxx → 名称(参数摘要) 格式
+    const isSkill = msg.toolName?.startsWith('skill_');
+    const skillName = isSkill ? msg.toolName!.replace(/^skill_/, '') : '';
+    const skillArgsSummary = isSkill && msg.toolArgs
+      ? Object.values(msg.toolArgs).map((v) => String(v)).filter(Boolean).join(', ')
+      : '';
     const toolLabel = isBash && bashCmd ? `Bash(${bashCmd})` : (msg.toolName || 'tool');
 
     return (
@@ -104,6 +110,8 @@ function MessageItem({ msg, showDetails = false }: { msg: Message; showDetails?:
           <Text color={dotColor}>{dot} </Text>
           {isBash && bashCmd ? (
             <Text><Text color="white" bold>Bash</Text><Text color="gray">({bashCmd})</Text></Text>
+          ) : isSkill ? (
+            <Text><Text color="cyan" bold>{skillName}</Text><Text color="gray">({skillArgsSummary})</Text></Text>
           ) : (
             <Text color="magenta" bold>{toolLabel}</Text>
           )}

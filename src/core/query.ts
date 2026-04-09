@@ -218,10 +218,17 @@ async function executeTool(
   callbacks: QueryCallbacks,
 ): Promise<{ content: string; isError: boolean }> {
   const toolExecId = uuid();
-  // 对 Bash 工具使用更直观的显示格式
+  // 对 Bash / Skill 工具使用更直观的显示格式
+  const isSkill = tc.name.startsWith('skill_');
+  const skillName = isSkill ? tc.name.replace(/^skill_/, '') : '';
+  const skillArgsSummary = isSkill
+    ? Object.values(tc.input).map((v) => String(v)).filter(Boolean).join(', ')
+    : '';
   const displayContent = tc.name === 'Bash' && tc.input.command
     ? `Bash(${tc.input.command})`
-    : `调用工具: ${tc.name}`;
+    : isSkill
+      ? `${skillName}(${skillArgsSummary})`
+      : `调用工具: ${tc.name}`;
 
   callbacks.onMessage({
     id: toolExecId,
@@ -283,7 +290,9 @@ async function executeTool(
     const safeResult = sanitizeOutput(result);
     const doneContent = tc.name === 'Bash' && tc.input.command
       ? `Bash(${tc.input.command}) 执行完成`
-      : `工具 ${tc.name} 执行完成`;
+      : isSkill
+        ? `${skillName}(${skillArgsSummary}) 执行完成`
+        : `工具 ${tc.name} 执行完成`;
     callbacks.onUpdateMessage(toolExecId, {
       status: 'success',
       content: doneContent,
