@@ -40,7 +40,7 @@
 
 ```bash
 # 安装
-npm i @code4bug/jarvis-agent
+npm i -g @code4bug/jarvis-agent
 
 # 启动
 npm run start

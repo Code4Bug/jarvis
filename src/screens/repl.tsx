@@ -14,7 +14,7 @@ import { Message, LoopState, Session } from '../types/index.js';
 import { QueryEngine, EngineCallbacks } from '../core/QueryEngine.js';
 import { DangerConfirmResult } from '../core/query.js';
 import { HIDE_WELCOME_AFTER_INPUT, APP_VERSION } from '../config/constants.js';
-import { generateAgentHint } from '../core/hint.js';
+import { generateAgentHint, getFallbackHint } from '../core/hint.js';
 import { filterCommands, filterAgentCommands, SlashCommand } from '../commands/index.js';
 import { setActiveAgent } from '../config/agentState.js';
 import { allTools } from '../tools/index.js';

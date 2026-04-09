@@ -163,9 +163,14 @@ const FALLBACK_HINTS: Record<string, string> = {
 
 const DEFAULT_HINT = 'Try "create a util logging.py that..."';
 
-/** 获取角色对应的静态兜底提示 */
-function getFallbackHint(agentName: string): string {
-  return FALLBACK_HINTS[agentName.toLowerCase()] ?? DEFAULT_HINT;
+/** 获取角色对应的静态兜底提示（同步，可用于初始 placeholder） */
+export function getFallbackHint(agentName?: string): string {
+  if (agentName) {
+    return FALLBACK_HINTS[agentName.toLowerCase()] ?? DEFAULT_HINT;
+  }
+  const agent = getAgent(DEFAULT_AGENT);
+  const name = agent?.meta.name ?? 'Jarvis';
+  return FALLBACK_HINTS[name.toLowerCase()] ?? DEFAULT_HINT;
 }
 
 // ===== 格式清理 =====
@@ -236,23 +241,30 @@ ${contextBlock}
     try {
       const url = llmConfig.baseUrl || 'https://api.openai.com/v1/chat/completions';
 
+      const requestBody: Record<string, unknown> = {
+        model: llmConfig.model,
+        messages: [
+          { role: 'system', content: systemMsg },
+          { role: 'user', content: '请生成一条输入提示。' },
+        ],
+        max_tokens: 100,
+        temperature: 0.8,
+        stream: false,
+        // GLM-4.7 / GLM-5 关闭深度思考（Z.AI 官方参数）
+        thinking: { type: 'disabled' },
+        // Ollama 原生关闭 thinking 模式
+        think: false,
+        // OpenAI 兼容格式关闭 thinking（Qwen 等）
+        chat_template_kwargs: { enable_thinking: false },
+      };
+
       const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${llmConfig.apiKey}`,
         },
-        body: JSON.stringify({
-          model: llmConfig.model,
-          messages: [
-            { role: 'system', content: systemMsg },
-            { role: 'user', content: '请生成一条输入提示。' },
-          ],
-          max_tokens: 100,
-          temperature: 0.8,
-          stream: false,
-          chat_template_kwargs: { enable_thinking: false },
-        }),
+        body: JSON.stringify(requestBody),
         signal: controller.signal,
       });
 
@@ -267,10 +279,15 @@ ${contextBlock}
       const data = await response.json() as any;
 
       // 兼容不同 API 的响应格式
+      const message = data.choices?.[0]?.message;
       const text =
-        data.choices?.[0]?.message?.content?.trim() ??
-        data.result?.trim() ??
-        data.output?.text?.trim();
+        message?.content?.trim() ||
+        // 部分模型（如 Ollama Gemma4 thinking 模式）内容在 reasoning 字段
+        message?.reasoning_content?.trim() ||
+        message?.reasoning?.trim() ||
+        data.result?.trim() ||
+        data.output?.text?.trim() ||
+        '';
 
       if (!text) {
         console.error('[hint] LLM 返回为空，原始响应:', JSON.stringify(data).slice(0, 300));
@@ -285,7 +302,11 @@ ${contextBlock}
     }
   }
 
-  const text = await doRequest(15000);
+  // 本地模型推理慢，给更长超时；云端 API 保持短超时
+  const isLocal = /localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\./.test(llmConfig.baseUrl ?? '');
+  const timeoutMs = isLocal ? 30000 : 5000;
+
+  const text = await doRequest(timeoutMs);
   if (!text) return fallback;
 
   return normalizeHint(text);
