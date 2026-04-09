@@ -286,6 +286,16 @@ export class LLMServiceImpl implements LLMService {
     // 用于累积 tool_calls（可能跨多个 chunk）
     const pendingToolCalls = new Map<number, { id: string; name: string; args: string }>();
 
+    // 轮询 abortSignal，一旦外部中断立即 abort HTTP 请求，打断 reader.read() 阻塞
+    const abortPollTimer = abortSignal
+      ? setInterval(() => {
+          if (abortSignal.aborted) {
+            controller.abort();
+            clearInterval(abortPollTimer!);
+          }
+        }, 50)
+      : null;
+
     try {
       while (true) {
         // 检查是否需要中断
@@ -376,6 +386,7 @@ export class LLMServiceImpl implements LLMService {
       }
       callbacks.onError(new Error(`流式读取失败: ${err.message}`));
     } finally {
+      if (abortPollTimer) clearInterval(abortPollTimer);
       reader.releaseLock();
     }
   }

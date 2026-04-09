@@ -4,12 +4,13 @@ import { writeFile } from './writeFile.js';
 import { runCommand } from './runCommand.js';
 import { listDirectory } from './listDirectory.js';
 import { searchFiles } from './searchFiles.js';
+import { semanticSearch } from './semanticSearch.js';
 import { createSkill } from './createSkill.js';
 
-export { readFile, writeFile, runCommand, listDirectory, searchFiles, createSkill };
+export { readFile, writeFile, runCommand, listDirectory, searchFiles, semanticSearch, createSkill };
 
 /** 所有内置工具 */
-export const allTools: Tool[] = [readFile, writeFile, runCommand, listDirectory, searchFiles, createSkill];
+export const allTools: Tool[] = [readFile, writeFile, runCommand, listDirectory, searchFiles, semanticSearch, createSkill];
 
 /** 按名称查找内置工具 */
 export function findTool(name: string): Tool | undefined {

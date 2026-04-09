@@ -69,7 +69,7 @@ export interface SensitivePattern {
 /** 敏感信息匹配规则 — 用于输出脱敏 */
 export const SENSITIVE_PATTERNS: SensitivePattern[] = [
   { name: 'AWS Access Key',    pattern: /\b(AKIA[0-9A-Z]{16})\b/g,                          replacement: '[AWS_ACCESS_KEY]' },
-  { name: 'AWS Secret Key',    pattern: /\b([A-Za-z0-9/+=]{40})\b/g,                        replacement: '[AWS_SECRET_KEY]' },
+  { name: 'AWS Secret Key',    pattern: /(?<![A-Za-z0-9/])([A-Za-z0-9+=]{40})(?![A-Za-z0-9/])/g, replacement: '[AWS_SECRET_KEY]' },
   { name: 'Generic API Key',   pattern: /\b(api[_-]?key|apikey)\s*[:=]\s*['"]?([^\s'"]+)/gi, replacement: '$1=[REDACTED]' },
   { name: 'Generic Secret',    pattern: /\b(secret|token|password|passwd|pwd)\s*[:=]\s*['"]?([^\s'"]+)/gi, replacement: '$1=[REDACTED]' },
   { name: 'Bearer Token',      pattern: /Bearer\s+[A-Za-z0-9\-._~+/]+=*/g,                  replacement: 'Bearer [REDACTED]' },

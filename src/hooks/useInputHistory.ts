@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -7,25 +7,49 @@ const HISTORY_DIR = path.join(os.homedir(), '.jarvis');
 const HISTORY_FILE = path.join(HISTORY_DIR, '.input_history');
 const MAX_HISTORY = 20;
 
+// 历史记录使用 JSON 数组格式存储，天然支持多行内容，无需手动转义
+
+/** 还原旧 encodeLine 格式：将字面量 \n 还原为真实换行，\\\\ 还原为 \\ */
+function decodeLegacyLine(s: string): string {
+  let result = '';
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === '\\' && i + 1 < s.length) {
+      const next = s[i + 1];
+      if (next === 'n') { result += '\n'; i++; continue; }
+      if (next === '\\') { result += '\\'; i++; continue; }
+    }
+    result += s[i];
+  }
+  return result;
+}
+
 /** 从文件加载历史记录 */
 function loadHistory(): string[] {
   try {
     if (!fs.existsSync(HISTORY_FILE)) return [];
     const content = fs.readFileSync(HISTORY_FILE, 'utf-8').trim();
     if (!content) return [];
-    return content.split('\n').slice(-MAX_HISTORY);
+    // 尝试 JSON 格式（新格式）
+    if (content.startsWith('[')) {
+      try {
+        const arr = JSON.parse(content);
+        if (Array.isArray(arr)) return arr.filter((s): s is string => typeof s === 'string').slice(-MAX_HISTORY);
+      } catch { /* JSON 解析失败，回退纯文本 */ }
+    }
+    // 回退：旧的纯文本格式，对每行做 decode 还原可能的转义
+    return content.split('\n').filter(Boolean).slice(-MAX_HISTORY).map(decodeLegacyLine);
   } catch {
     return [];
   }
 }
 
-/** 保存历史记录到文件 */
+/** 保存历史记录到文件（JSON 数组格式） */
 function saveHistory(history: string[]): void {
   try {
     if (!fs.existsSync(HISTORY_DIR)) {
       fs.mkdirSync(HISTORY_DIR, { recursive: true });
     }
-    fs.writeFileSync(HISTORY_FILE, history.slice(-MAX_HISTORY).join('\n') + '\n', 'utf-8');
+    fs.writeFileSync(HISTORY_FILE, JSON.stringify(history.slice(-MAX_HISTORY)), 'utf-8');
   } catch {
     // 静默失败
   }

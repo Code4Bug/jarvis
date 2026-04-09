@@ -144,16 +144,18 @@ async function runOneIteration(
   });
 
   await new Promise<void>((resolve, reject) => {
+    let resolved = false;
+    const safeResolve = () => { if (!resolved) { resolved = true; resolve(); } };
     service
       .streamMessage(transcript, tools, {
         onThinking: (text) => {
-          if (abortSignal.aborted) return;
+          if (abortSignal.aborted) { safeResolve(); return; }
           accumulatedThinking += text;
           // 实时更新 thinking 消息内容，让用户看到思考过程
           callbacks.onUpdateMessage(thinkingId, { content: accumulatedThinking });
         },
         onText: (text) => {
-          if (abortSignal.aborted) { resolve(); return; }
+          if (abortSignal.aborted) { safeResolve(); return; }
           if (firstTokenTime === null) {
             firstTokenTime = Date.now();
             // 收到首 token，将 thinking 消息标记为完成（保留 think 内容）
@@ -168,11 +170,11 @@ async function runOneIteration(
           callbacks.onStreamText(text);
         },
         onToolUse: (id, name, input) => {
-          if (abortSignal.aborted) { resolve(); return; }
+          if (abortSignal.aborted) { safeResolve(); return; }
           toolCall = { id, name, input };
-          resolve();
+          safeResolve();
         },
-        onComplete: () => resolve(),
+        onComplete: () => safeResolve(),
         onError: (err) => reject(err),
       }, abortSignal)
       .catch(reject);
