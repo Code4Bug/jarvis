@@ -1,6 +1,6 @@
 import { exec } from 'child_process';
-import { Tool } from '../types/index.js';
-import { sanitizeOutput } from '../core/safeguard.js';
+import { Tool } from '../types/index';
+import { sanitizeOutput } from '../core/safeguard';
 
 /**
  * 异步执行命令，不阻塞事件循环，保证 TUI 渲染正常

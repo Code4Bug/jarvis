@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { MODEL_NAME, PROJECT_NAME, ENABLE_THINKING_MODE_TOGGLE, CONTEXT_TOKEN_LIMIT } from '../config/constants.js';
+import { MODEL_NAME, PROJECT_NAME, ENABLE_THINKING_MODE_TOGGLE, CONTEXT_TOKEN_LIMIT } from '../config/constants';
 
 interface StatusBarProps {
   width: number;

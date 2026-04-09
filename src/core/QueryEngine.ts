@@ -9,14 +9,14 @@ import {
   TranscriptMessage,
   LoopState,
 } from '../types/index.js';
-import { getAllTools } from '../tools/index.js';
-import { executeQuery, QueryCallbacks, DangerConfirmResult } from './query.js';
-import { MockService } from '../services/api/mock.js';
-import { LLMServiceImpl, getDefaultConfig } from '../services/api/llm.js';
-import { loadConfig, getActiveModel } from '../config/loader.js';
-import { SESSIONS_DIR } from '../config/constants.js';
-import { setActiveAgent } from '../config/agentState.js';
-import { clearAuthorizations } from './safeguard.js';
+import { getAllTools } from '../tools/index';
+import { executeQuery, QueryCallbacks, DangerConfirmResult } from './query';
+import { MockService } from '../services/api/mock';
+import { LLMServiceImpl, getDefaultConfig } from '../services/api/llm';
+import { loadConfig, getActiveModel } from '../config/loader';
+import { SESSIONS_DIR } from '../config/constants';
+import { setActiveAgent } from '../config/agentState';
+import { clearAuthorizations } from './safeguard';
 
 export interface EngineCallbacks {
   onMessage: (msg: Message) => void;

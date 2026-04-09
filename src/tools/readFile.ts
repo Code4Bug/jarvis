@@ -1,5 +1,5 @@
 import fs from 'fs';
-import { Tool } from '../types/index.js';
+import { Tool } from '../types/index';
 
 export const readFile: Tool = {
   name: 'read_file',

@@ -1,11 +1,11 @@
-import { Tool } from '../types/index.js';
-import { readFile } from './readFile.js';
-import { writeFile } from './writeFile.js';
-import { runCommand } from './runCommand.js';
-import { listDirectory } from './listDirectory.js';
-import { searchFiles } from './searchFiles.js';
-import { semanticSearch } from './semanticSearch.js';
-import { createSkill } from './createSkill.js';
+import { Tool } from '../types/index';
+import { readFile } from './readFile';
+import { writeFile } from './writeFile';
+import { runCommand } from './runCommand';
+import { listDirectory } from './listDirectory';
+import { searchFiles } from './searchFiles';
+import { semanticSearch } from './semanticSearch';
+import { createSkill } from './createSkill';
 
 export { readFile, writeFile, runCommand, listDirectory, searchFiles, semanticSearch, createSkill };
 
@@ -19,7 +19,7 @@ export function findTool(name: string): Tool | undefined {
 
 // ===== 合并工具（内置 + 外部 Skills）=====
 
-import { getMergedTools, findMergedTool } from '../skills/index.js';
+import { getMergedTools, findMergedTool } from '../skills/index';
 
 /** 获取所有工具（内置 + 外部 skills），供 QueryEngine 使用 */
 export function getAllTools(): Tool[] {

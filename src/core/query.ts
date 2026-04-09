@@ -7,9 +7,9 @@ import {
   TranscriptMessage,
   ContentBlock,
 } from '../types/index.js';
-import { findToolMerged as findTool } from '../tools/index.js';
-import { MAX_ITERATIONS } from '../config/constants.js';
-import { sanitizeOutput, validateCommand, authorizeCommand, authorizeRule, AuthMode } from './safeguard.js';
+import { findToolMerged as findTool } from '../tools/index';
+import { MAX_ITERATIONS } from '../config/constants';
+import { sanitizeOutput, validateCommand, authorizeCommand, authorizeRule, AuthMode } from './safeguard';
 
 interface ToolCallInfo {
   id: string;

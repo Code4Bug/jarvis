@@ -7,12 +7,12 @@
  *   3. ./.jarvis/config.json
  */
 
-import { LLMService, StreamCallbacks, TranscriptMessage, Tool, ContentBlock, AbortSignal as AppAbortSignal } from '../../types/index.js';
-import { ModelConfig, loadConfig, getActiveModel } from '../../config/loader.js';
-import { getAgent } from '../../agents/index.js';
-import { DEFAULT_AGENT } from '../../config/constants.js';
-import { getActiveAgent } from '../../config/agentState.js';
-import { getSystemInfoPrompt } from '../../config/systemInfo.js';
+import { LLMService, StreamCallbacks, TranscriptMessage, Tool, ContentBlock, AbortSignal as AppAbortSignal } from '../../types/index';
+import { ModelConfig, loadConfig, getActiveModel } from '../../config/loader';
+import { getAgent } from '../../agents/index';
+import { DEFAULT_AGENT } from '../../config/constants';
+import { getActiveAgent } from '../../config/agentState';
+import { getSystemInfoPrompt } from '../../config/systemInfo';
 
 export interface LLMConfig {
   apiKey: string;

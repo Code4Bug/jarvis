@@ -152,7 +152,7 @@ npm run start
 修改 `src/core/QueryEngine.ts`：
 
 ```typescript
-import { LLMServiceImpl, getDefaultConfig } from '../services/api/llm.js';
+import { LLMServiceImpl, getDefaultConfig } from '../services/api/llm';
 
 // constructor 中替换
 this.service = new LLMServiceImpl(getDefaultConfig());
@@ -172,7 +172,7 @@ export API_KEY=your-api-key
 
 ```typescript
 // src/tools/myTool.ts
-import { Tool } from '../types/index.js';
+import { Tool } from '../types/index';
 
 export const myTool: Tool = {
   name: 'my_tool',

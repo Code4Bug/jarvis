@@ -1,30 +1,30 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import Spinner from 'ink-spinner';
-import MultilineInput from '../components/MultilineInput.js';
-import WelcomeHeader from '../components/WelcomeHeader.js';
-import MessageItem from '../components/MessageItem.js';
-import StreamingText from '../components/StreamingText.js';
-import StatusBar from '../components/StatusBar.js';
-import SlashCommandMenu from '../components/SlashCommandMenu.js';
-import DangerConfirm, { ConfirmChoice } from '../components/DangerConfirm.js';
-import { useWindowFocus } from '../hooks/useFocus.js';
-import { useInputHistory } from '../hooks/useInputHistory.js';
-import { Message, LoopState, Session } from '../types/index.js';
-import { QueryEngine, EngineCallbacks } from '../core/QueryEngine.js';
-import { DangerConfirmResult } from '../core/query.js';
-import { HIDE_WELCOME_AFTER_INPUT, APP_VERSION } from '../config/constants.js';
-import { generateAgentHint, getFallbackHint } from '../core/hint.js';
-import { filterCommands, filterAgentCommands, SlashCommand } from '../commands/index.js';
-import { setActiveAgent } from '../config/agentState.js';
-import { allTools } from '../tools/index.js';
-import { listSkills } from '../skills/index.js';
-import { getExternalSkillsDir } from '../skills/loader.js';
+import MultilineInput from '../components/MultilineInput';
+import WelcomeHeader from '../components/WelcomeHeader';
+import MessageItem from '../components/MessageItem';
+import StreamingText from '../components/StreamingText';
+import StatusBar from '../components/StatusBar';
+import SlashCommandMenu from '../components/SlashCommandMenu';
+import DangerConfirm, { ConfirmChoice } from '../components/DangerConfirm';
+import { useWindowFocus } from '../hooks/useFocus';
+import { useInputHistory } from '../hooks/useInputHistory';
+import { Message, LoopState, Session } from '../types/index';
+import { QueryEngine, EngineCallbacks } from '../core/QueryEngine';
+import { DangerConfirmResult } from '../core/query';
+import { HIDE_WELCOME_AFTER_INPUT, APP_VERSION } from '../config/constants';
+import { generateAgentHint, getFallbackHint } from '../core/hint';
+import { filterCommands, filterAgentCommands, SlashCommand } from '../commands/index';
+import { setActiveAgent } from '../config/agentState';
+import { allTools } from '../tools/index';
+import { listSkills } from '../skills/index';
+import { getExternalSkillsDir } from '../skills/loader';
 import {
   listPermanentAuthorizations,
   DANGER_RULES,
 } from '../core/safeguard.js';
-import { executeInit } from '../commands/init.js';
+import { executeInit } from '../commands/init';
 
 /** 双击 Ctrl+C 退出：第一次按下后显示倒计时，3 秒内再按一次退出，否则取消 */
 function useDoubleCtrlCExit(exit: () => void) {

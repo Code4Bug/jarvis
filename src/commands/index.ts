@@ -38,8 +38,8 @@ const toolCommands: SlashCommand[] = [
 ];
 
 /** 智能体子命令：从 agents 目录动态加载（二级菜单） */
-import { loadAllAgents } from '../agents/index.js';
-import { listSkills } from '../skills/index.js';
+import { loadAllAgents } from '../agents/index';
+import { listSkills } from '../skills/index';
 
 let _agentSubCommands: SlashCommand[] | null = null;
 

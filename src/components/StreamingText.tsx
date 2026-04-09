@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import MarkdownText from './MarkdownText.js';
+import MarkdownText from './MarkdownText';
 
 function StreamingText({ text }: { text: string }) {
   if (!text) return null;

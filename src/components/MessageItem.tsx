@@ -1,8 +1,8 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import Spinner from 'ink-spinner';
-import { Message, MessageStatus, MessageType } from '../types/index.js';
-import MarkdownText from './MarkdownText.js';
+import { Message, MessageStatus, MessageType } from '../types/index';
+import MarkdownText from './MarkdownText';
 
 // 状态圆点 icon，根据消息类型 + 状态决定颜色
 // reasoning 完成 → 白色 / tool_exec 成功 → 绿色 / error → 红色 / aborted → 黄色 / pending → 黄色

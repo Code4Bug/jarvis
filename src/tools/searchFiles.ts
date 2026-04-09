@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { Tool } from '../types/index.js';
+import { Tool } from '../types/index';
 
 export const searchFiles: Tool = {
   name: 'search_files',

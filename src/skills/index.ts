@@ -13,9 +13,9 @@
 import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { Tool } from '../types/index.js';
-import { SkillDefinition, scanExternalSkills, getExternalSkillsDir } from './loader.js';
-import { allTools as builtinTools } from '../tools/index.js';
+import { Tool } from '../types/index';
+import { SkillDefinition, scanExternalSkills, getExternalSkillsDir } from './loader';
+import { allTools as builtinTools } from '../tools/index';
 
 // ===== 缓存 =====
 
@@ -119,7 +119,7 @@ async function executeSkillScript(
   // 写入临时 Python 文件，避免 shell -c 的转义问题
   const tmpFile = path.join(skill.dirPath, `_tmp_run_${Date.now()}.py`);
   const pyCode = [
-    'import sys, json',
+    'import sys,on',
     `sys.path.insert(0, ${JSON.stringify(path.dirname(scriptPath))})`,
     `from skill import ${funcName}`,
     `result = ${funcName}(${kwargs.join(', ')})`,

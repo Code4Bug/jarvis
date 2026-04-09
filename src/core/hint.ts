@@ -7,10 +7,10 @@
 
 import fs from 'fs';
 import path from 'path';
-import { getAgent } from '../agents/index.js';
-import { DEFAULT_AGENT } from '../config/constants.js';
-import { loadConfig, getActiveModel } from '../config/loader.js';
-import { getDefaultConfig } from '../services/api/llm.js';
+import { getAgent } from '../agents/index';
+import { DEFAULT_AGENT } from '../config/constants';
+import { loadConfig, getActiveModel } from '../config/loader';
+import { getDefaultConfig } from '../services/api/llm';
 
 // ===== 项目上下文采集 =====
 
