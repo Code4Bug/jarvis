@@ -94,6 +94,11 @@ export default function REPL() {
   const streamBufferRef = useRef('');
   const streamTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const STREAM_FLUSH_INTERVAL = 80; // ms
+  // thinking 文本节流：同样用 ref 积累，定时刷新到 messages state
+  const thinkingBufferRef = useRef('');
+  const thinkingIdRef = useRef<string | null>(null);
+  const thinkingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const THINKING_FLUSH_INTERVAL = 100; // ms
   const [loopState, setLoopState] = useState<LoopState | null>(null);
   const [showWelcome, setShowWelcome] = useState(true);
   const sessionRef = useRef<Session>({
@@ -180,20 +185,70 @@ export default function REPL() {
     }
   }, []);
 
+  // 启动 thinking 文本节流定时器
+  const startThinkingTimer = useCallback(() => {
+    if (thinkingTimerRef.current) return;
+    thinkingTimerRef.current = setInterval(() => {
+      const id = thinkingIdRef.current;
+      const buf = thinkingBufferRef.current;
+      if (id && buf) {
+        setMessages((prev) =>
+          prev.map((msg) => (msg.id === id ? { ...msg, content: buf } : msg)),
+        );
+      }
+    }, THINKING_FLUSH_INTERVAL);
+  }, []);
+
+  const stopThinkingTimer = useCallback(() => {
+    if (thinkingTimerRef.current) {
+      clearInterval(thinkingTimerRef.current);
+      thinkingTimerRef.current = null;
+    }
+    // 最终刷新残余
+    const id = thinkingIdRef.current;
+    const buf = thinkingBufferRef.current;
+    if (id && buf) {
+      setMessages((prev) =>
+        prev.map((msg) => (msg.id === id ? { ...msg, content: buf } : msg)),
+      );
+    }
+  }, []);
+
   // 组件卸载时清理定时器
   useEffect(() => () => {
     if (tokenTimerRef.current) clearInterval(tokenTimerRef.current);
     if (streamTimerRef.current) clearInterval(streamTimerRef.current);
+    if (thinkingTimerRef.current) clearInterval(thinkingTimerRef.current);
   }, []);
 
   const callbacks: EngineCallbacks = {
     onMessage: (msg) => {
       setMessages((prev) => [...prev, msg]);
     },
-    onUpdateMessage: (id, updates) =>
+    onUpdateMessage: (id, updates) => {
+      // thinking 消息的 content 更新走节流通道，避免高频 re-render
+      if (updates.content !== undefined && !updates.status && thinkingIdRef.current === null) {
+        // 首次 thinking 更新，记录 id 并启动节流
+        thinkingIdRef.current = id;
+        thinkingBufferRef.current = updates.content;
+        startThinkingTimer();
+        return;
+      }
+      if (thinkingIdRef.current === id && updates.content !== undefined && !updates.status) {
+        // 后续 thinking chunk，只更新 buffer
+        thinkingBufferRef.current = updates.content;
+        return;
+      }
+      // thinking 完成（带 status 更新）或其他消息：停止节流，直接更新
+      if (thinkingIdRef.current === id && updates.status) {
+        stopThinkingTimer();
+        thinkingIdRef.current = null;
+        thinkingBufferRef.current = '';
+      }
       setMessages((prev) =>
         prev.map((msg) => (msg.id === id ? { ...msg, ...updates } : msg)),
-      ),
+      );
+    },
     onStreamText: (text) => {
       // 不直接 setState，而是积累到 buffer，由定时器批量刷新
       streamBufferRef.current += text;
@@ -212,6 +267,9 @@ export default function REPL() {
       } else {
         stopTokenTimer();
         stopStreamTimer();
+        stopThinkingTimer();
+        thinkingIdRef.current = null;
+        thinkingBufferRef.current = '';
         setStreamText('');
         streamBufferRef.current = '';
       }
@@ -770,6 +828,16 @@ export default function REPL() {
     }
   }, [agentMenuMode, resumeMenuMode]);
 
+  // Tab 填入 placeholder 推荐问题
+  const handleTabFillPlaceholder = useCallback(() => {
+    if (placeholder) {
+      // placeholder 格式为 Try "xxx..."，提取引号内的内容
+      const match = placeholder.match(/^Try\s+"(.+)"$/);
+      const text = match ? match[1] : placeholder;
+      setInput(text);
+    }
+  }, [placeholder]);
+
   // 快捷键
   useInput((ch, key) => {
     if (key.tab && slashMenuVisible) { handleSlashMenuSelect(); return; }
@@ -880,6 +948,7 @@ export default function REPL() {
                 onSlashMenuDown={handleSlashMenuDown}
                 onSlashMenuSelect={handleSlashMenuSelect}
                 onSlashMenuClose={handleSlashMenuClose}
+                onTabFillPlaceholder={handleTabFillPlaceholder}
               />
             </Box>
           )}

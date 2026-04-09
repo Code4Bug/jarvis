@@ -1,0 +1,37 @@
+# 源代码（只发布 dist）
+src/
+public/
+test_docxs/
+tmp/
+design/
+docs/
+optimize/
+
+# 配置文件
+.kiro/
+.vscode/
+.git/
+.DS_Store
+*.log
+node_modules/
+
+# 开发文件
+vite.config.ts
+tsconfig.json
+tsconfig.node.json
+tsconfig.node.tsbuildinfo
+index.html
+*.md.backup
+
+# 测试和文档
+AGENTS.md
+OOXML.md
+opitmize.md
+task.md
+NPM_PACKAGE_GUIDE.md
+
+# 构建产物
+dist/
+dist-standalone/
+# 只保留 dist-lib 作为库输出
+!dist-lib/

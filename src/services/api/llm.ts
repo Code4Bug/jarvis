@@ -93,29 +93,35 @@ function toOpenAIMessages(transcript: TranscriptMessage[], systemPrompt: string)
     if (msg.role === 'user') {
       messages.push({ role: 'user', content: msg.content as string });
     } else if (msg.role === 'assistant') {
-      const blocks = msg.content as ContentBlock[];
-      let text = '';
-      const toolCalls: OpenAIToolCall[] = [];
+      // 兼容 content 为 string（旧会话恢复）或 ContentBlock[] 两种情况
+      if (typeof msg.content === 'string') {
+        messages.push({ role: 'assistant', content: msg.content || '(empty)' });
+      } else {
+        const blocks = msg.content as ContentBlock[];
+        let text = '';
+        const toolCalls: OpenAIToolCall[] = [];
 
-      for (const block of blocks) {
-        if (block.type === 'text') {
-          text += block.text;
-        } else if (block.type === 'tool_use') {
-          toolCalls.push({
-            id: block.id,
-            type: 'function',
-            function: {
-              name: block.name,
-              arguments: JSON.stringify(block.input),
-            },
-          });
+        for (const block of blocks) {
+          if (block.type === 'text') {
+            text += block.text;
+          } else if (block.type === 'tool_use') {
+            toolCalls.push({
+              id: block.id,
+              type: 'function',
+              function: {
+                name: block.name,
+                arguments: JSON.stringify(block.input),
+              },
+            });
+          }
         }
-      }
 
-      const assistantMsg: OpenAIMessage = { role: 'assistant' };
-      if (text) assistantMsg.content = text;
-      if (toolCalls.length > 0) assistantMsg.tool_calls = toolCalls;
-      messages.push(assistantMsg);
+        const assistantMsg: OpenAIMessage = { role: 'assistant' };
+        // 确保 content 不为空，避免 API MissingParameter 错误
+        assistantMsg.content = text || null;
+        if (toolCalls.length > 0) assistantMsg.tool_calls = toolCalls;
+        messages.push(assistantMsg);
+      }
     } else if (msg.role === 'tool_result') {
       messages.push({
         role: 'tool',

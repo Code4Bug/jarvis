@@ -223,8 +223,12 @@ export class QueryEngine {
       for (const msg of loaded.messages) {
         if (msg.type === 'user') {
           this.transcript.push({ role: 'user', content: msg.content });
-        } else if (msg.type === 'reasoning' && msg.status === 'success') {
-          this.transcript.push({ role: 'assistant', content: msg.content });
+        } else if (msg.type === 'reasoning' && msg.status === 'success' && msg.content) {
+          // assistant 消息的 content 必须是 ContentBlock[]，与 query.ts 中的构建方式一致
+          this.transcript.push({
+            role: 'assistant',
+            content: [{ type: 'text', text: msg.content }],
+          });
         } else if (msg.type === 'tool_exec' && msg.toolName && msg.toolResult !== undefined) {
           // 工具调用：assistant tool_use + tool_result
           this.transcript.push({

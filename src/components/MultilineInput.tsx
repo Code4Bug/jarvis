@@ -32,6 +32,8 @@ interface MultilineInputProps {
   onSlashMenuSelect?: () => void;
   /** 斜杠命令菜单：关闭菜单 */
   onSlashMenuClose?: () => void;
+  /** 输入为空时按 Tab 的回调（用于填入 placeholder） */
+  onTabFillPlaceholder?: () => void;
 }
 
 /**
@@ -58,6 +60,7 @@ export default function MultilineInput({
   onSlashMenuDown,
   onSlashMenuSelect,
   onSlashMenuClose,
+  onTabFillPlaceholder,
 }: MultilineInputProps) {
   const { stdin } = useStdin();
   const [cursor, setCursor] = useState(value.length);
@@ -125,6 +128,8 @@ export default function MultilineInput({
   onSlashMenuSelectRef.current = onSlashMenuSelect;
   const onSlashMenuCloseRef = useRef(onSlashMenuClose);
   onSlashMenuCloseRef.current = onSlashMenuClose;
+  const onTabFillPlaceholderRef = useRef(onTabFillPlaceholder);
+  onTabFillPlaceholderRef.current = onTabFillPlaceholder;
 
   // 辅助：根据光标偏移计算所在行号和行内列号
   const getCursorRowCol = (text: string, pos: number) => {
@@ -277,6 +282,9 @@ export default function MultilineInput({
       // 斜杠菜单激活时，Tab = 选中当前项
       if (slashMenuActiveRef.current) {
         onSlashMenuSelectRef.current?.();
+      } else if (valueRef.current.length === 0) {
+        // 输入为空时，Tab = 填入 placeholder
+        onTabFillPlaceholderRef.current?.();
       }
       return;
     }
@@ -452,6 +460,7 @@ export default function MultilineInput({
         <Box>
           <Text inverse color="white">{placeholder[0]}</Text>
           <Text color="gray">{placeholder.slice(1)}</Text>
+          <Text color="gray" dimColor>  [Tab]</Text>
         </Box>
       );
     }

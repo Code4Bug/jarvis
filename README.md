@@ -1,5 +1,10 @@
 # Jarvis
 
+[![npm version](https://img.shields.io/npm/v/@code4bug/jarvis-agent)](https://www.npmjs.com/package/@code4bug/jarvis-agent)
+[![npm downloads](https://img.shields.io/npm/dm/@code4bug/jarvis-agent)](https://www.npmjs.com/package/@code4bug/jarvis-agent)
+[![license](https://img.shields.io/npm/l/@code4bug/jarvis-agent)](./LICENSE)
+[![node](https://img.shields.io/node/v/@code4bug/jarvis-agent)](https://nodejs.org)
+
 > *"Good evening, sir. What can I do for you?"*
 
 轻量化单机智能体，基于 React + TypeScript + Ink 构建的终端交互式 AI Agent。
@@ -34,8 +39,8 @@
 ## 快速开始
 
 ```bash
-# 安装依赖
-npm install
+# 安装
+npm i @code4bug/jarvis-agent
 
 # 启动
 npm run start
