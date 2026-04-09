@@ -7,6 +7,19 @@ const PASTE_PLACEHOLDER_RE = /\[Pasted text #(\d+) \+(\d+) lines\]/g;
 /** 粘贴检测的时间窗口（ms），在此窗口内连续到达的数据视为一次粘贴 */
 const PASTE_DETECT_WINDOW_MS = 8;
 
+/**
+ * IME composing 检测时间窗口（ms）。
+ * 在此窗口内连续到达的可打印字符视为 IME composing 输入，
+ * 延迟渲染以避免拼音字母逐个触发 re-render 导致 TUI 偏移。
+ */
+const IME_COMPOSE_WINDOW_MS = 80;
+
+/** 判断字符串是否全部为 ASCII 小写字母（拼音输入的典型特征） */
+const isAsciiLowerAlpha = (s: string) => /^[a-z]+$/.test(s);
+
+/** 判断字符串是否包含非 ASCII 字符（中文、日文等 CJK 字符） */
+const hasNonAscii = (s: string) => /[^\x00-\x7F]/.test(s);
+
 interface PastedChunk {
   id: number;
   content: string;
@@ -75,6 +88,14 @@ export default function MultilineInput({
   // 时间窗口粘贴检测：收集短时间内连续到达的数据块
   const batchBufferRef = useRef('');
   const batchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // IME composing 缓冲：积累拼音字母，等 composing 结束后再一次性更新
+  // imeBufferRef: 当前正在 composing 的拼音字母
+  // imeTimerRef: composing 超时定时器，超时后将拼音作为普通文本提交
+  // imeInsertedLen: 已经临时插入到 value 中的 composing 文本长度（用于替换）
+  const imeBufferRef = useRef('');
+  const imeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const imeInsertedLenRef = useRef(0);
 
   // 启用 bracketed paste mode
   useEffect(() => {
@@ -318,10 +339,76 @@ export default function MultilineInput({
     // 多行 → 粘贴
     if (cleaned.includes('\n') && cleaned.length > 1) {
       insertPaste(cleaned);
-    } else {
-      // 单字符或单行短文本，按普通输入处理
-      handleNormalInput(buf);
+      return;
     }
+
+    // 检测是否为 IME composing 输入（连续小写字母 = 拼音）
+    if (isAsciiLowerAlpha(buf)) {
+      // 可能是拼音 composing，进入 IME 缓冲模式
+      imeBufferRef.current += buf;
+      // 不更新 value/不触发 re-render，只重置 IME 超时
+      if (imeTimerRef.current !== null) {
+        clearTimeout(imeTimerRef.current);
+      }
+      imeTimerRef.current = setTimeout(flushImeBuffer, IME_COMPOSE_WINDOW_MS);
+      return;
+    }
+
+    // 收到非 ASCII 字符（中文等）：如果有 IME 缓冲，说明 composing 结束
+    if (hasNonAscii(buf) && imeBufferRef.current.length > 0) {
+      // 丢弃之前积累的拼音字母（它们只是 composing 中间态），
+      // 回退已临时插入的 composing 文本
+      if (imeTimerRef.current !== null) {
+        clearTimeout(imeTimerRef.current);
+        imeTimerRef.current = null;
+      }
+      const insertedLen = imeInsertedLenRef.current;
+      imeBufferRef.current = '';
+      imeInsertedLenRef.current = 0;
+      if (insertedLen > 0) {
+        // 回退之前临时插入的拼音
+        const v = valueRef.current;
+        const c = cursorRef.current;
+        const newVal = v.slice(0, c - insertedLen) + v.slice(c);
+        emitChange(newVal);
+        setCursor(c - insertedLen);
+      }
+      // 插入最终的中文字符
+      handleNormalInput(buf);
+      return;
+    }
+
+    // 收到非拼音的 ASCII 可打印字符，且有 IME 缓冲：先提交 IME 缓冲
+    if (imeBufferRef.current.length > 0) {
+      commitImeBuffer();
+    }
+
+    // 单字符或单行短文本，按普通输入处理
+    handleNormalInput(buf);
+  };
+
+  /** 提交 IME 缓冲区中的拼音为普通文本（composing 超时或被打断时调用） */
+  const commitImeBuffer = () => {
+    if (imeTimerRef.current !== null) {
+      clearTimeout(imeTimerRef.current);
+      imeTimerRef.current = null;
+    }
+    const buf = imeBufferRef.current;
+    const insertedLen = imeInsertedLenRef.current;
+    imeBufferRef.current = '';
+    imeInsertedLenRef.current = 0;
+    if (!buf) return;
+    // 需要插入的是 buf 中尚未被临时插入的部分
+    const remaining = buf.slice(insertedLen);
+    if (remaining.length > 0) {
+      handleNormalInput(remaining);
+    }
+  };
+
+  /** IME composing 超时：将积累的拼音作为普通文本提交 */
+  const flushImeBuffer = () => {
+    imeTimerRef.current = null;
+    commitImeBuffer();
   };
 
   // Alt+Enter 组合键检测：ESC 可能单独到达，需要等待后续字符
@@ -400,6 +487,10 @@ export default function MultilineInput({
 
       if (isSingleControl && batchBufferRef.current === '') {
         // 没有正在积累的缓冲，直接处理控制字符
+        // 如果有 IME 缓冲，先提交
+        if (imeBufferRef.current.length > 0) {
+          commitImeBuffer();
+        }
         handleNormalInput(raw);
         return;
       }
@@ -429,6 +520,10 @@ export default function MultilineInput({
         clearTimeout(escTimerRef.current);
         escTimerRef.current = null;
       }
+      if (imeTimerRef.current !== null) {
+        clearTimeout(imeTimerRef.current);
+        imeTimerRef.current = null;
+      }
     };
   }, [stdin, isActive]);
 
@@ -440,6 +535,9 @@ export default function MultilineInput({
       }
       if (escTimerRef.current !== null) {
         clearTimeout(escTimerRef.current);
+      }
+      if (imeTimerRef.current !== null) {
+        clearTimeout(imeTimerRef.current);
       }
     };
   }, []);

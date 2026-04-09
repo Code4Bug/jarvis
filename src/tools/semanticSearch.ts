@@ -8,8 +8,8 @@
 
 import fs from 'fs';
 import path from 'path';
-import { Tool } from '../types/index.js';
-import { loadConfig, getActiveModel } from '../config/loader.js';
+import { Tool } from '../types/index';
+import { loadConfig, getActiveModel } from '../config/loader';
 
 /** 通过 LLM 扩展关键词，返回扩展后的词列表（含原始关键词） */
 async function expandKeywords(keyword: string): Promise<string[]> {
