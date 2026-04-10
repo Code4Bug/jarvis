@@ -10,75 +10,17 @@ import SlashCommandMenu from '../components/SlashCommandMenu';
 import DangerConfirm, { ConfirmChoice } from '../components/DangerConfirm';
 import { useWindowFocus } from '../hooks/useFocus';
 import { useInputHistory } from '../hooks/useInputHistory';
+import { useDoubleCtrlCExit } from '../hooks/useDoubleCtrlCExit';
+import { useTerminalWidth } from '../hooks/useTerminalWidth';
+import { useStreamThrottle } from '../hooks/useStreamThrottle';
+import { useTokenDisplay } from '../hooks/useTokenDisplay';
+import { useSlashMenu } from '../hooks/useSlashMenu';
+import { executeSlashCommand } from './slashCommands';
 import { Message, LoopState, Session } from '../types/index';
 import { QueryEngine, EngineCallbacks } from '../core/QueryEngine';
 import { DangerConfirmResult } from '../core/query';
-import { HIDE_WELCOME_AFTER_INPUT, APP_VERSION } from '../config/constants';
-import { generateAgentHint, getFallbackHint } from '../core/hint';
-import { filterCommands, filterAgentCommands, SlashCommand } from '../commands/index';
-import { setActiveAgent } from '../config/agentState';
-import { allTools } from '../tools/index';
-import { listSkills } from '../skills/index';
-import { getExternalSkillsDir } from '../skills/loader';
-import {
-  listPermanentAuthorizations,
-  DANGER_RULES,
-} from '../core/safeguard.js';
-import { executeInit } from '../commands/init';
-
-/** 双击 Ctrl+C 退出：第一次按下后显示倒计时，3 秒内再按一次退出，否则取消 */
-function useDoubleCtrlCExit(exit: () => void) {
-  const [countdown, setCountdown] = useState<number | null>(null);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const clearTimer = useCallback(() => {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-    setCountdown(null);
-  }, []);
-
-  const handleCtrlC = useCallback(() => {
-    if (countdown !== null) {
-      // 第二次按下，立即退出
-      clearTimer();
-      exit();
-      return;
-    }
-    // 第一次按下，启动 1 秒倒计时
-    setCountdown(1);
-    timerRef.current = setInterval(() => {
-      setCountdown((prev) => {
-        if (prev === null || prev <= 1) {
-          clearTimer();
-          return null;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  }, [countdown, clearTimer, exit]);
-
-  // 组件卸载时清理
-  useEffect(() => () => { if (timerRef.current) clearInterval(timerRef.current); }, []);
-
-  return { countdown, handleCtrlC };
-}
-
-/** 响应式终端宽度 */
-function useTerminalWidth(): number {
-  const [width, setWidth] = useState(() => process.stdout.columns || 80);
-
-  useEffect(() => {
-    const onResize = () => {
-      setWidth(process.stdout.columns || 80);
-    };
-    process.stdout.on('resize', onResize);
-    return () => { process.stdout.off('resize', onResize); };
-  }, []);
-
-  return width;
-}
+import { HIDE_WELCOME_AFTER_INPUT } from '../config/constants';
+import { generateAgentHint } from '../core/hint';
 
 export default function REPL() {
   const { exit } = useApp();
@@ -86,40 +28,46 @@ export default function REPL() {
   const windowFocused = useWindowFocus();
   const { countdown, handleCtrlC } = useDoubleCtrlCExit(exit);
   const { pushHistory, navigateUp, navigateDown, resetNavigation } = useInputHistory();
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
-  const [streamText, setStreamText] = useState('');
-  // 流式文本节流：用 ref 积累 chunk，定时刷新到 state，减少 re-render 频率
-  const streamBufferRef = useRef('');
-  const streamTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const STREAM_FLUSH_INTERVAL = 80; // ms
-  // thinking 文本节流：同样用 ref 积累，定时刷新到 messages state
-  const thinkingBufferRef = useRef('');
-  const thinkingIdRef = useRef<string | null>(null);
-  const thinkingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const THINKING_FLUSH_INTERVAL = 100; // ms
   const [loopState, setLoopState] = useState<LoopState | null>(null);
   const [showWelcome, setShowWelcome] = useState(true);
+  const [showDetails, setShowDetails] = useState(false);
+  const [placeholder, setPlaceholder] = useState('');
+  const lastEscRef = useRef<number>(0);
+
   const sessionRef = useRef<Session>({
     id: '', messages: [], createdAt: 0, updatedAt: 0, totalTokens: 0, totalCost: 0,
   });
-  const [showDetails, setShowDetails] = useState(false);
-  // 双击 ESC 清空输入：记录首次 ESC 时间戳
-  const lastEscRef = useRef<number>(0);
-  // 动态 placeholder：启动时通过 LLM 生成符合角色的提示
-  const [placeholder, setPlaceholder] = useState('');
+  const engineRef = useRef<QueryEngine | null>(null);
 
-  // ===== 斜杠命令菜单状态 =====
-  const [slashMenuVisible, setSlashMenuVisible] = useState(false);
-  const [slashMenuItems, setSlashMenuItems] = useState<SlashCommand[]>([]);
-  const [slashMenuIndex, setSlashMenuIndex] = useState(0);
-  // 是否处于 /agent 二级菜单
-  const [agentMenuMode, setAgentMenuMode] = useState(false);
-  // 是否处于 /resume 二级菜单
-  const [resumeMenuMode, setResumeMenuMode] = useState(false);
+  // 节流 hooks
+  const {
+    streamText, streamBufferRef,
+    startStreamTimer, stopStreamTimer,
+    appendStreamChunk, clearStream,
+    handleThinkingUpdate, finishThinking, thinkingIdRef, stopAll,
+  } = useStreamThrottle(setMessages);
 
-  // ===== 危险命令确认状态 =====
+  const {
+    displayTokens, tokenCountRef,
+    startTokenTimer, stopTokenTimer,
+    updateTokenCount, resetTokens,
+  } = useTokenDisplay();
+
+  // 斜杠菜单
+  const slashMenu = useSlashMenu({
+    engineRef, sessionRef, tokenCountRef,
+    setMessages,
+    setDisplayTokens: (n: number) => updateTokenCount(n),
+    setStreamText: clearStream,
+    streamBufferRef,
+    setLoopState, setIsProcessing, setShowWelcome, setInput,
+  });
+
+  // 危险命令确认
   const [dangerConfirm, setDangerConfirm] = useState<{
     command: string;
     reason: string;
@@ -127,136 +75,40 @@ export default function REPL() {
     resolve: (choice: DangerConfirmResult) => void;
   } | null>(null);
 
-  const engineRef = useRef<QueryEngine | null>(null);
-
-  // 用 ref 缓存 token 计数，定时器驱动 UI 刷新，避免每个 chunk 都触发 re-render
-  const tokenCountRef = useRef<number>(0);
-  const tokenTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [displayTokens, setDisplayTokens] = useState(0);
-
   useEffect(() => {
     engineRef.current = new QueryEngine();
     sessionRef.current = engineRef.current.getSession();
-    // 异步生成符合当前角色的输入提示
     generateAgentHint().then((hint) => setPlaceholder(hint)).catch((err) => {
       console.error('[hint] 初始化提示失败:', err);
     });
   }, []);
 
-  // 启动 token 进度条定时刷新（每 100ms 同步一次 ref → state）
-  const startTokenTimer = useCallback(() => {
-    if (tokenTimerRef.current) return;
-    tokenTimerRef.current = setInterval(() => {
-      setDisplayTokens(tokenCountRef.current);
-    }, 100);
-  }, []);
-
-  const stopTokenTimer = useCallback(() => {
-    if (tokenTimerRef.current) {
-      clearInterval(tokenTimerRef.current);
-      tokenTimerRef.current = null;
-    }
-    // 最终同步一次，确保最终值准确
-    setDisplayTokens(tokenCountRef.current);
-  }, []);
-
-  // 启动流式文本节流定时器
-  const startStreamTimer = useCallback(() => {
-    if (streamTimerRef.current) return;
-    streamTimerRef.current = setInterval(() => {
-      if (streamBufferRef.current) {
-        const buf = streamBufferRef.current;
-        streamBufferRef.current = '';
-        setStreamText((prev) => prev + buf);
-      }
-    }, STREAM_FLUSH_INTERVAL);
-  }, []);
-
-  const stopStreamTimer = useCallback(() => {
-    if (streamTimerRef.current) {
-      clearInterval(streamTimerRef.current);
-      streamTimerRef.current = null;
-    }
-    // 最终刷新残余
-    if (streamBufferRef.current) {
-      const buf = streamBufferRef.current;
-      streamBufferRef.current = '';
-      setStreamText((prev) => prev + buf);
-    }
-  }, []);
-
-  // 启动 thinking 文本节流定时器
-  const startThinkingTimer = useCallback(() => {
-    if (thinkingTimerRef.current) return;
-    thinkingTimerRef.current = setInterval(() => {
-      const id = thinkingIdRef.current;
-      const buf = thinkingBufferRef.current;
-      if (id && buf) {
-        setMessages((prev) =>
-          prev.map((msg) => (msg.id === id ? { ...msg, content: buf } : msg)),
-        );
-      }
-    }, THINKING_FLUSH_INTERVAL);
-  }, []);
-
-  const stopThinkingTimer = useCallback(() => {
-    if (thinkingTimerRef.current) {
-      clearInterval(thinkingTimerRef.current);
-      thinkingTimerRef.current = null;
-    }
-    // 最终刷新残余
-    const id = thinkingIdRef.current;
-    const buf = thinkingBufferRef.current;
-    if (id && buf) {
-      setMessages((prev) =>
-        prev.map((msg) => (msg.id === id ? { ...msg, content: buf } : msg)),
-      );
-    }
-  }, []);
-
-  // 组件卸载时清理定时器
-  useEffect(() => () => {
-    if (tokenTimerRef.current) clearInterval(tokenTimerRef.current);
-    if (streamTimerRef.current) clearInterval(streamTimerRef.current);
-    if (thinkingTimerRef.current) clearInterval(thinkingTimerRef.current);
-  }, []);
-
+  // ===== Engine Callbacks =====
   const callbacks: EngineCallbacks = {
     onMessage: (msg) => {
       setMessages((prev) => [...prev, msg]);
     },
     onUpdateMessage: (id, updates) => {
-      // thinking 消息的 content 更新走节流通道，避免高频 re-render
       if (updates.content !== undefined && !updates.status && thinkingIdRef.current === null) {
-        // 首次 thinking 更新，记录 id 并启动节流
-        thinkingIdRef.current = id;
-        thinkingBufferRef.current = updates.content;
-        startThinkingTimer();
+        handleThinkingUpdate(id, updates.content);
         return;
       }
       if (thinkingIdRef.current === id && updates.content !== undefined && !updates.status) {
-        // 后续 thinking chunk，只更新 buffer
-        thinkingBufferRef.current = updates.content;
+        handleThinkingUpdate(id, updates.content);
         return;
       }
-      // thinking 完成（带 status 更新）或其他消息：停止节流，直接更新
       if (thinkingIdRef.current === id && updates.status) {
-        stopThinkingTimer();
-        thinkingIdRef.current = null;
-        thinkingBufferRef.current = '';
+        finishThinking();
       }
       setMessages((prev) =>
         prev.map((msg) => (msg.id === id ? { ...msg, ...updates } : msg)),
       );
     },
     onStreamText: (text) => {
-      // 不直接 setState，而是积累到 buffer，由定时器批量刷新
-      streamBufferRef.current += text;
+      appendStreamChunk(text);
     },
     onClearStreamText: () => {
-      // 每轮迭代结束时清空流式文本，避免 streamText 被后续工具消息挤到底部
-      streamBufferRef.current = '';
-      setStreamText('');
+      clearStream();
     },
     onLoopStateChange: (state) => {
       setLoopState(state);
@@ -266,18 +118,12 @@ export default function REPL() {
         startStreamTimer();
       } else {
         stopTokenTimer();
-        stopStreamTimer();
-        stopThinkingTimer();
-        thinkingIdRef.current = null;
-        thinkingBufferRef.current = '';
-        setStreamText('');
-        streamBufferRef.current = '';
+        stopAll();
       }
     },
     onSessionUpdate: (s) => {
-      // 会话对象本身不参与当前界面渲染，保留在 ref 中避免每个 chunk 触发整页重绘
       sessionRef.current = s;
-      tokenCountRef.current = s.totalTokens;
+      updateTokenCount(s.totalTokens);
     },
     onConfirmDangerousCommand: (command, reason, ruleName) => {
       return new Promise<DangerConfirmResult>((resolve) => {
@@ -286,205 +132,60 @@ export default function REPL() {
     },
   };
 
-  // ===== 斜杠命令执行器 =====
-  const executeSlashCommand = useCallback((cmdName: string) => {
-    switch (cmdName) {
-      case 'init': {
-        const result = executeInit();
-        const initMsg: Message = {
-          id: `init-${Date.now()}`,
-          type: 'system',
-          status: 'success',
-          content: result.displayText,
-          timestamp: Date.now(),
-        };
-        setMessages((prev) => [...prev, initMsg]);
-        break;
-      }
-
-      case 'new':
-        // 新会话：重置引擎 + 清空所有状态
-        if (engineRef.current) {
-          engineRef.current.reset();
-          sessionRef.current = engineRef.current.getSession();
-        }
-        setMessages([]);
-        setStreamText('');
-        streamBufferRef.current = '';
-        setLoopState(null);
-        setIsProcessing(false);
-        setShowWelcome(true);
-        tokenCountRef.current = 0;
-        setDisplayTokens(0);
-        generateAgentHint().then((hint) => setPlaceholder(hint)).catch(() => {});
-        break;
-
-      case 'help': {
-        const helpText = [
-          '可用命令:',
-          '  /init        初始化项目信息，生成 JARVIS.md',
-          '  /new         开启新会话，重新初始化上下文',
-          '  /resume      恢复历史会话（支持二级菜单选择）',
-          '  /resume <ID> 直接恢复指定会话',
-          '  /help        显示此帮助信息',
-          '  /session_clear 清理所有非当前会话的历史记录',
-          '  /skills      查看当前所有 tools 和 skills',
-          '  /permissions 查看所有持久化授权列表',
-          '  /create_skill <描述> 根据需求创建新 skill',
-          '  /agent <名称> 切换智能体（需重启生效）',
-          '  /read <路径>  读取文件内容',
-          '  /write <路径> 写入文件',
-          '  /bash <命令>  执行 Bash 命令',
-          '  /ls <路径>    列出目录',
-          '  /search <词>  搜索文件内容',
-          '  /version     显示当前版本号',
-          '',
-          '快捷键:',
-          '  Ctrl+L       清屏重置',
-          '  Ctrl+O       切换详情显示',
-          '  ESC          中断推理 / 双击清空输入',
-          '  Ctrl+C ×2    退出',
-        ].join('\n');
-        const helpMsg: Message = {
-          id: `help-${Date.now()}`,
-          type: 'system',
-          status: 'success',
-          content: helpText,
-          timestamp: Date.now(),
-        };
-        setMessages((prev) => [...prev, helpMsg]);
-        break;
-      }
-
-      case 'session_clear': {
-        if (engineRef.current) {
-          const count = engineRef.current.clearOtherSessions();
-          const resultMsg: Message = {
-            id: `session-clear-${Date.now()}`,
-            type: 'system',
-            status: 'success',
-            content: count > 0
-              ? `已清理 ${count} 个历史会话，当前会话保留。`
-              : '当前没有需要清理的历史会话。',
-            timestamp: Date.now(),
-          };
-          setMessages((prev) => [...prev, resultMsg]);
-        }
-        break;
-      }
-
-      case 'permissions': {
-        const perms = listPermanentAuthorizations();
-        const lines: string[] = ['持久化授权列表 (~/.jarvis/.permissions.json)', ''];
-        if (perms.rules.length > 0) {
-          lines.push('按规则授权:');
-          for (const r of perms.rules) {
-            const rule = DANGER_RULES.find((d) => d.name === r);
-            lines.push(`  [v] ${r}${rule ? ` — ${rule.reason}` : ''}`);
-          }
-          lines.push('');
-        }
-        if (perms.commands.length > 0) {
-          lines.push('按命令授权:');
-          for (const c of perms.commands) {
-            lines.push(`  [v] [${c.ruleName}] ${c.command} (${c.grantedAt})`);
-          }
-          lines.push('');
-        }
-        if (perms.rules.length === 0 && perms.commands.length === 0) {
-          lines.push('(空) 暂无持久化授权记录');
-        }
-        const permMsg: Message = {
-          id: `perms-${Date.now()}`,
-          type: 'system',
-          status: 'success',
-          content: lines.join('\n'),
-          timestamp: Date.now(),
-        };
-        setMessages((prev) => [...prev, permMsg]);
-        break;
-      }
-
-      case 'skills': {
-        const skills = listSkills();
-        const parts: string[] = [];
-
-        parts.push('### Built-in Tools\n');
-        allTools.forEach((t, i) => {
-          parts.push(`${i + 1}. \`${t.name}\` - ${t.description.slice(0, 60)}`);
-        });
-
-        parts.push('');
-        parts.push(`### External Skills\n`);
-        parts.push(`> ${getExternalSkillsDir()}\n`);
-
-        if (skills.length === 0) {
-          parts.push('_(empty)_');
-        } else {
-          skills.forEach((s, i) => {
-            const hint = s.meta.argumentHint ? ` \`${s.meta.argumentHint}\`` : '';
-            const flags: string[] = [];
-            if (s.meta.disableModelInvocation) flags.push('manual-only');
-            if (s.meta.userInvocable === false) flags.push('hidden');
-            const flagStr = flags.length > 0 ? ` _(${flags.join(', ')})_` : '';
-            parts.push(`${i + 1}. \`${s.meta.name}\`${hint} - ${s.meta.description}${flagStr}`);
-          });
-        }
-
-        parts.push('');
-        parts.push(`**Total:** ${allTools.length} tools + ${skills.length} skills = ${allTools.length + skills.length}`);
-
-        const skillsMsg: Message = {
-          id: `skills-${Date.now()}`,
-          type: 'system',
-          status: 'success',
-          content: parts.join('\n'),
-          timestamp: Date.now(),
-        };
-        setMessages((prev) => [...prev, skillsMsg]);
-        break;
-      }
-
-      case 'version': {
-        const versionMsg: Message = {
-          id: `version-${Date.now()}`,
-          type: 'system',
-          status: 'success',
-          content: `当前版本: ${APP_VERSION}`,
-          timestamp: Date.now(),
-        };
-        setMessages((prev) => [...prev, versionMsg]);
-        break;
-      }
-
-      default:
-        break;
-    }
-  }, []);
-
+  // ===== 提交处理 =====
   const handleSubmit = useCallback(
     async (value: string) => {
       const trimmed = value.trim();
       if (!trimmed || isProcessing || !engineRef.current) return;
 
-      // 斜杠命令拦截
       if (trimmed.startsWith('/')) {
         const parts = trimmed.slice(1).split(/\s+/);
         const cmdName = parts[0].toLowerCase();
         const hasArgs = parts.length > 1 && parts.slice(1).join('').length > 0;
 
-        // 内置命令：直接执行
+        // 内置命令
         if (['new', 'help', 'init', 'session_clear', 'permissions', 'skills', 'version'].includes(cmdName)) {
           setInput('');
-          setSlashMenuVisible(false);
-          executeSlashCommand(cmdName);
+          slashMenu.setSlashMenuVisible(false);
+
+          if (cmdName === 'new') {
+            // 新会话：重置引擎 + 清空所有状态
+            if (engineRef.current) {
+              engineRef.current.reset();
+              sessionRef.current = engineRef.current.getSession();
+            }
+            setMessages([]);
+            clearStream();
+            setLoopState(null);
+            setIsProcessing(false);
+            setShowWelcome(true);
+            resetTokens();
+            generateAgentHint().then((hint) => setPlaceholder(hint)).catch(() => {});
+          } else if (cmdName === 'session_clear') {
+            if (engineRef.current) {
+              const count = engineRef.current.clearOtherSessions();
+              const resultMsg: Message = {
+                id: `session-clear-${Date.now()}`,
+                type: 'system',
+                status: 'success',
+                content: count > 0
+                  ? `已清理 ${count} 个历史会话，当前会话保留。`
+                  : '当前没有需要清理的历史会话。',
+                timestamp: Date.now(),
+              };
+              setMessages((prev) => [...prev, resultMsg]);
+            }
+          } else {
+            const msg = executeSlashCommand(cmdName);
+            if (msg) setMessages((prev) => [...prev, msg]);
+          }
           return;
         }
 
-        // /create_skill 命令：将需求转发给 LLM，由 LLM 调用 create_skill 工具完成
+        // /create_skill
         if (cmdName === 'create_skill') {
           setInput('');
-          setSlashMenuVisible(false);
+          slashMenu.setSlashMenuVisible(false);
           const skillArgs = parts.slice(1).join(' ').trim();
           if (!skillArgs) {
             const hintMsg: Message = {
@@ -497,54 +198,22 @@ export default function REPL() {
             setMessages((prev) => [...prev, hintMsg]);
             return;
           }
-          // 构造提示，让 LLM 使用 create_skill 工具
           const prompt = `请使用 create_skill 工具帮我创建一个新的 skill。需求如下：${skillArgs}\n\n请根据需求自动生成合适的 name、description、instruction，如果需要 Python 实现也请生成 skill.py 代码。`;
           if (HIDE_WELCOME_AFTER_INPUT) setShowWelcome(false);
           pushHistory(trimmed);
-          setStreamText('');
+          clearStream();
           await engineRef.current.handleQuery(prompt, callbacks);
           return;
         }
 
-        // /resume 命令处理
+        // /resume
         if (cmdName === 'resume') {
           setInput('');
-          setSlashMenuVisible(false);
-          setResumeMenuMode(false);
+          slashMenu.setSlashMenuVisible(false);
           if (hasArgs && engineRef.current) {
-            // /resume <id> 直接恢复
             const sessionId = parts.slice(1).join(' ').trim();
-            const result = engineRef.current.loadSession(sessionId);
-            if (result) {
-              setMessages(result.messages);
-              sessionRef.current = result.session;
-              tokenCountRef.current = result.session.totalTokens;
-              setDisplayTokens(result.session.totalTokens);
-              setStreamText('');
-              streamBufferRef.current = '';
-              setLoopState(null);
-              setIsProcessing(false);
-              setShowWelcome(false);
-              const resumeMsg: Message = {
-                id: `resume-${Date.now()}`,
-                type: 'system',
-                status: 'success',
-                content: `已恢复会话 ${sessionId.slice(0, 8)}...（${result.messages.length} 条消息）`,
-                timestamp: Date.now(),
-              };
-              setMessages((prev) => [...prev, resumeMsg]);
-            } else {
-              const errMsg: Message = {
-                id: `resume-err-${Date.now()}`,
-                type: 'error',
-                status: 'error',
-                content: `会话 ${sessionId} 不存在或已损坏`,
-                timestamp: Date.now(),
-              };
-              setMessages((prev) => [...prev, errMsg]);
-            }
+            slashMenu.resumeSession(sessionId);
           } else {
-            // /resume 无参数：显示会话列表
             const sessions = QueryEngine.listSessions().slice(0, 20);
             if (sessions.length === 0) {
               const noMsg: Message = {
@@ -574,59 +243,20 @@ export default function REPL() {
           return;
         }
 
-        // /permissions 命令：查看持久化授权列表
-        if (cmdName === 'permissions') {
-          setInput('');
-          setSlashMenuVisible(false);
-          const perms = listPermanentAuthorizations();
-          const lines: string[] = ['持久化授权列表 (~/.jarvis/.permissions.json)', ''];
-          if (perms.rules.length > 0) {
-            lines.push('按规则授权:');
-            for (const r of perms.rules) {
-              const rule = DANGER_RULES.find((d) => d.name === r);
-              lines.push(`  [v] ${r}${rule ? ` — ${rule.reason}` : ''}`);
-            }
-            lines.push('');
-          }
-          if (perms.commands.length > 0) {
-            lines.push('按命令授权:');
-            for (const c of perms.commands) {
-              lines.push(`  [v] [${c.ruleName}] ${c.command} (${c.grantedAt})`);
-            }
-            lines.push('');
-          }
-          if (perms.rules.length === 0 && perms.commands.length === 0) {
-            lines.push('(空) 暂无持久化授权记录');
-          }
-          const listMsg: Message = {
-            id: `perms-${Date.now()}`,
-            type: 'system',
-            status: 'success',
-            content: lines.join('\n'),
-            timestamp: Date.now(),
-          };
-          setMessages((prev) => [...prev, listMsg]);
-          return;
-        }
-
-        // 工具命令带参数：去掉 / 前缀，作为消息发给 LLM
-        if (hasArgs) {
-          // 继续走正常提交流程
-        } else {
-          // 无参数的 / 命令，忽略
-          return;
-        }
+        // 工具命令带参数：继续走正常提交流程；无参数则忽略
+        if (!hasArgs) return;
       }
 
       if (HIDE_WELCOME_AFTER_INPUT) setShowWelcome(false);
       pushHistory(trimmed);
       setInput('');
-      setStreamText('');
+      clearStream();
       await engineRef.current.handleQuery(trimmed, callbacks);
     },
-    [isProcessing, pushHistory, executeSlashCommand],
+    [isProcessing, pushHistory, clearStream, resetTokens, slashMenu],
   );
 
+  // ===== 输入处理 =====
   const handleUpArrow = useCallback(() => {
     const result = navigateUp(input);
     if (result !== null) setInput(result);
@@ -640,207 +270,21 @@ export default function REPL() {
   const handleInputChange = useCallback((val: string) => {
     resetNavigation();
     setInput(val);
+    slashMenu.updateSlashMenu(val);
+  }, [resetNavigation, slashMenu]);
 
-    // 检测斜杠命令：输入以 / 开头且为单行
-    if (val.startsWith('/') && !val.includes('\n')) {
-      const query = val.slice(1); // 去掉 /
-
-      // /agent 二级菜单：输入 "/agent " 或 "/agent xxx" 时显示智能体列表
-      if (/^agent\s/i.test(query)) {
-        const subQuery = query.replace(/^agent\s*/i, '');
-        const matched = filterAgentCommands(subQuery);
-        setSlashMenuItems(matched);
-        setSlashMenuIndex(0);
-        setSlashMenuVisible(matched.length > 0);
-        setAgentMenuMode(true);
-        setResumeMenuMode(false);
-        return;
-      }
-
-      // /resume 二级菜单：输入 "/resume " 或 "/resume xxx" 时显示历史会话列表
-      if (/^resume\s/i.test(query)) {
-        const subQuery = query.replace(/^resume\s*/i, '').toLowerCase();
-        const sessions = QueryEngine.listSessions().slice(0, 20);
-        const items: SlashCommand[] = sessions.map((s) => {
-          const date = new Date(s.updatedAt);
-          const dateStr = `${date.getMonth() + 1}/${date.getDate()} ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
-          return {
-            name: s.id,
-            description: `[${dateStr}] ${s.summary}`,
-            category: 'builtin' as const,
-          };
-        });
-        const matched = subQuery
-          ? items.filter((i) => i.name.includes(subQuery) || i.description.toLowerCase().includes(subQuery))
-          : items;
-        setSlashMenuItems(matched);
-        setSlashMenuIndex(0);
-        setSlashMenuVisible(matched.length > 0);
-        setResumeMenuMode(true);
-        setAgentMenuMode(false);
-        return;
-      }
-
-      // 一级菜单
-      const matched = filterCommands(query);
-      setSlashMenuItems(matched);
-      setSlashMenuIndex(0);
-      setSlashMenuVisible(matched.length > 0);
-      setAgentMenuMode(false);
-      setResumeMenuMode(false);
-    } else {
-      setSlashMenuVisible(false);
-      setAgentMenuMode(false);
-      setResumeMenuMode(false);
-    }
-  }, [resetNavigation]);
-
-  // 斜杠菜单：上移
-  const handleSlashMenuUp = useCallback(() => {
-    setSlashMenuIndex((prev) => (prev > 0 ? prev - 1 : slashMenuItems.length - 1));
-  }, [slashMenuItems.length]);
-
-  // 斜杠菜单：下移
-  const handleSlashMenuDown = useCallback(() => {
-    setSlashMenuIndex((prev) => (prev < slashMenuItems.length - 1 ? prev + 1 : 0));
-  }, [slashMenuItems.length]);
-
-  // 斜杠菜单：选中
-  const handleSlashMenuSelect = useCallback(() => {
-    if (slashMenuItems.length === 0) return;
-    const cmd = slashMenuItems[slashMenuIndex];
-    if (!cmd) return;
-
-    // 二级 agent 菜单：执行切换
-    if (agentMenuMode) {
-      setActiveAgent(cmd.name);
-      setInput('');
-      setSlashMenuVisible(false);
-      setAgentMenuMode(false);
-      const switchMsg: Message = {
-        id: `switch-${Date.now()}`,
-        type: 'system',
-        status: 'success',
-        content: `已切换智能体为 ${cmd.name}，请重启以生效（Ctrl+C 两次退出后重新启动）`,
-        timestamp: Date.now(),
-      };
-      setMessages((prev) => [...prev, switchMsg]);
-      return;
-    }
-
-    // 二级 resume 菜单：恢复会话
-    if (resumeMenuMode) {
-      setInput('');
-      setSlashMenuVisible(false);
-      setResumeMenuMode(false);
-      if (engineRef.current) {
-        const result = engineRef.current.loadSession(cmd.name);
-        if (result) {
-          setMessages(result.messages);
-          sessionRef.current = result.session;
-          tokenCountRef.current = result.session.totalTokens;
-          setDisplayTokens(result.session.totalTokens);
-          setStreamText('');
-          streamBufferRef.current = '';
-          setLoopState(null);
-          setIsProcessing(false);
-          setShowWelcome(false);
-          const resumeMsg: Message = {
-            id: `resume-${Date.now()}`,
-            type: 'system',
-            status: 'success',
-            content: `已恢复会话 ${cmd.name.slice(0, 8)}...（${result.messages.length} 条消息）`,
-            timestamp: Date.now(),
-          };
-          setMessages((prev) => [...prev, resumeMsg]);
-        } else {
-          const errMsg: Message = {
-            id: `resume-err-${Date.now()}`,
-            type: 'error',
-            status: 'error',
-            content: `会话 ${cmd.name} 不存在或已损坏`,
-            timestamp: Date.now(),
-          };
-          setMessages((prev) => [...prev, errMsg]);
-        }
-      }
-      return;
-    }
-
-    // 一级菜单选中 /agent → 进入二级菜单
-    if (cmd.name === 'agent') {
-      setInput('/agent ');
-      const matched = filterAgentCommands('');
-      setSlashMenuItems(matched);
-      setSlashMenuIndex(0);
-      setAgentMenuMode(true);
-      setResumeMenuMode(false);
-      return;
-    }
-
-    // 一级菜单选中 /resume → 进入二级菜单
-    if (cmd.name === 'resume') {
-      setInput('/resume ');
-      const sessions = QueryEngine.listSessions().slice(0, 20);
-      const items: SlashCommand[] = sessions.map((s) => {
-        const date = new Date(s.updatedAt);
-        const dateStr = `${date.getMonth() + 1}/${date.getDate()} ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
-        return {
-          name: s.id,
-          description: `[${dateStr}] ${s.summary}`,
-          category: 'builtin' as const,
-        };
-      });
-      setSlashMenuItems(items);
-      setSlashMenuIndex(0);
-      setSlashMenuVisible(items.length > 0);
-      setResumeMenuMode(true);
-      setAgentMenuMode(false);
-      return;
-    }
-
-    // 内置命令：直接执行
-    if (cmd.category === 'builtin') {
-      setInput('');
-      setSlashMenuVisible(false);
-      executeSlashCommand(cmd.name);
-      return;
-    }
-
-    // 工具命令：填入输入框，等用户补充参数
-    setInput(`/${cmd.name} `);
-    setSlashMenuVisible(false);
-  }, [slashMenuItems, slashMenuIndex, agentMenuMode, resumeMenuMode, executeSlashCommand]);
-
-  // 斜杠菜单：关闭
-  const handleSlashMenuClose = useCallback(() => {
-    if (agentMenuMode || resumeMenuMode) {
-      // 二级菜单 ESC → 回到一级菜单
-      setAgentMenuMode(false);
-      setResumeMenuMode(false);
-      setInput('/');
-      const matched = filterCommands('');
-      setSlashMenuItems(matched);
-      setSlashMenuIndex(0);
-      setSlashMenuVisible(matched.length > 0);
-    } else {
-      setSlashMenuVisible(false);
-    }
-  }, [agentMenuMode, resumeMenuMode]);
-
-  // Tab 填入 placeholder 推荐问题
+  // Tab 填入 placeholder
   const handleTabFillPlaceholder = useCallback(() => {
     if (placeholder) {
-      // placeholder 格式为 Try "xxx..."，提取引号内的内容
       const match = placeholder.match(/^Try\s+"(.+)"$/);
       const text = match ? match[1] : placeholder;
       setInput(text);
     }
   }, [placeholder]);
 
-  // 快捷键
+  // ===== 快捷键 =====
   useInput((ch, key) => {
-    if (key.tab && slashMenuVisible) { handleSlashMenuSelect(); return; }
+    if (key.tab && slashMenu.slashMenuVisible) { slashMenu.handleSlashMenuSelect(); return; }
     if (key.ctrl && ch === 'c') { handleCtrlC(); return; }
     if (key.ctrl && ch === 'o') { setShowDetails((prev) => !prev); return; }
     if (key.ctrl && ch === 'l') {
@@ -849,14 +293,11 @@ export default function REPL() {
         sessionRef.current = engineRef.current.getSession();
       }
       setMessages([]);
-      setStreamText('');
-      streamBufferRef.current = '';
+      clearStream();
       setLoopState(null);
       setIsProcessing(false);
       setShowWelcome(true);
-      tokenCountRef.current = 0;
-      setDisplayTokens(0);
-      // 重新生成角色提示
+      resetTokens();
       generateAgentHint().then((hint) => setPlaceholder(hint)).catch((err) => {
         console.error('[hint] 重新生成提示失败:', err);
       });
@@ -864,10 +305,8 @@ export default function REPL() {
     }
     if (key.escape) {
       if (isProcessing && engineRef.current) {
-        // 推理中按 ESC：中断推理，流式文本停止后由 query 层标记最后一条消息为 aborted
         engineRef.current.abort();
       } else if (input.length > 0) {
-        // 输入框有内容：双击 ESC（500ms 内）清空
         const now = Date.now();
         if (now - lastEscRef.current < 500) {
           setInput('');
@@ -880,6 +319,7 @@ export default function REPL() {
     }
   });
 
+  // ===== 渲染 =====
   return (
     <Box flexDirection="column" width={width}>
       {showWelcome && <WelcomeHeader width={width} />}
@@ -910,10 +350,10 @@ export default function REPL() {
 
       <Box flexDirection="column" paddingX={1}>
         <Text color="gray">{'─'.repeat(Math.max(width - 2, 1))}</Text>
-        {slashMenuVisible && !isProcessing && (
+        {slashMenu.slashMenuVisible && !isProcessing && (
           <SlashCommandMenu
-            commands={slashMenuItems}
-            selectedIndex={slashMenuIndex}
+            commands={slashMenu.slashMenuItems}
+            selectedIndex={slashMenu.slashMenuIndex}
           />
         )}
         <Box>
@@ -943,11 +383,11 @@ export default function REPL() {
                 placeholder={placeholder}
                 isActive={!isProcessing}
                 showCursor={windowFocused && !isProcessing}
-                slashMenuActive={slashMenuVisible}
-                onSlashMenuUp={handleSlashMenuUp}
-                onSlashMenuDown={handleSlashMenuDown}
-                onSlashMenuSelect={handleSlashMenuSelect}
-                onSlashMenuClose={handleSlashMenuClose}
+                slashMenuActive={slashMenu.slashMenuVisible}
+                onSlashMenuUp={slashMenu.handleSlashMenuUp}
+                onSlashMenuDown={slashMenu.handleSlashMenuDown}
+                onSlashMenuSelect={slashMenu.handleSlashMenuSelect}
+                onSlashMenuClose={slashMenu.handleSlashMenuClose}
                 onTabFillPlaceholder={handleTabFillPlaceholder}
               />
             </Box>

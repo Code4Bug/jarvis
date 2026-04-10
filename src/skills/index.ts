@@ -119,7 +119,7 @@ async function executeSkillScript(
   // 写入临时 Python 文件，避免 shell -c 的转义问题
   const tmpFile = path.join(skill.dirPath, `_tmp_run_${Date.now()}.py`);
   const pyCode = [
-    'import sys,on',
+    'import sys,os,json',
     `sys.path.insert(0, ${JSON.stringify(path.dirname(scriptPath))})`,
     `from skill import ${funcName}`,
     `result = ${funcName}(${kwargs.join(', ')})`,
