@@ -13,9 +13,9 @@
 import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { Tool } from '../types/index';
-import { SkillDefinition, scanExternalSkills, getExternalSkillsDir } from './loader';
-import { allTools as builtinTools } from '../tools/index';
+import { Tool } from '../types/index.js';
+import { SkillDefinition, scanExternalSkills, getExternalSkillsDir } from './loader.js';
+import { allTools as builtinTools } from '../tools/index.js';
 
 // ===== 缓存 =====
 

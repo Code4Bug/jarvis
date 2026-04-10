@@ -9,7 +9,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { execSync } from 'child_process';
-import { APP_NAME, APP_VERSION } from '../config/constants';
+import { APP_NAME, APP_VERSION } from '../config/constants.js';
 
 // ===== 辅助函数 =====
 

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { SlashCommand } from '../commands/index';
+import { SlashCommand } from '../commands/index.js';
 
 interface SlashCommandMenuProps {
   commands: SlashCommand[];

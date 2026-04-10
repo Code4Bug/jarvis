@@ -1,9 +1,9 @@
-import { Message } from '../types/index';
-import { executeInit } from '../commands/init';
-import { APP_VERSION } from '../config/constants';
-import { allTools } from '../tools/index';
-import { listSkills } from '../skills/index';
-import { getExternalSkillsDir } from '../skills/loader';
+import { Message } from '../types/index.js';
+import { executeInit } from '../commands/init.js';
+import { APP_VERSION } from '../config/constants.js';
+import { allTools } from '../tools/index.js';
+import { listSkills } from '../skills/index.js';
+import { getExternalSkillsDir } from '../skills/loader.js';
 import {
   listPermanentAuthorizations,
   DANGER_RULES,

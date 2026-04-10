@@ -8,10 +8,10 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { Tool, TranscriptMessage } from '../types/index';
-import { getExternalSkillsDir } from '../skills/loader';
-import { reloadSkills } from '../skills/index';
-import { LLMServiceImpl, getDefaultConfig } from '../services/api/llm';
+import { Tool, TranscriptMessage } from '../types/index.js';
+import { getExternalSkillsDir } from '../skills/loader.js';
+import { reloadSkills } from '../skills/index.js';
+import { LLMServiceImpl, getDefaultConfig } from '../services/api/llm.js';
 
 // SKILL_INSTRUCTIONS.md 查找路径：项目根目录 > 用户主目录
 function loadSkillInstructions(): string {

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-import { APP_VERSION } from './config/constants';
-import { startJarvis } from './index';
+import { APP_VERSION } from './config/constants.js';
+import { startJarvis } from './index.js';
 
 const arg = process.argv[2];
 

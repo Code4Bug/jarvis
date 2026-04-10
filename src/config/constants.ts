@@ -29,7 +29,7 @@ export const SESSIONS_DIR = path.join(os.homedir(), '.jarvis', 'sessions');
 export const HIDE_WELCOME_AFTER_INPUT = false;
 
 /** 从配置文件获取当前模型名称 */
-import { loadConfig, getActiveModel } from './loader';
+import { loadConfig, getActiveModel } from './loader.js';
 
 const _cfg = loadConfig();
 
@@ -66,8 +66,8 @@ export const DEFAULT_AGENT_EMOJI = '>';
 
 // ===== 动态应用名称（跟随激活智能体） =====
 
-import { getAgent } from '../agents/index';
-import { getActiveAgent } from './agentState';
+import { getAgent } from '../agents/index.js';
+import { getActiveAgent } from './agentState.js';
 
 /** 当前激活的智能体名称 — 启动时从 ~/.jarvis/agent.json 读取，运行时可切换 */
 export const DEFAULT_AGENT = getActiveAgent(DEFAULT_AGENT_FALLBACK);

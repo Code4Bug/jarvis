@@ -1,4 +1,4 @@
-import { LLMService, StreamCallbacks, TranscriptMessage, Tool, AbortSignal as AppAbortSignal } from '../../types/index';
+import { LLMService, StreamCallbacks, TranscriptMessage, Tool, AbortSignal as AppAbortSignal } from '../../types/index.js';
 
 /**
  * Mock LLM 服务 - 模拟智能体行为，支持工具调用

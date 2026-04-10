@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Message } from '../types/index';
+import { Message } from '../types/index.js';
 
 const STREAM_FLUSH_INTERVAL = 80; // ms
 const THINKING_FLUSH_INTERVAL = 100; // ms

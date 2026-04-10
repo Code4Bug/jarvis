@@ -11,9 +11,9 @@ import {
   ContentBlock,
   ToolCallInfo,
 } from '../types/index.js';
-import { findToolMerged as findTool } from '../tools/index';
-import { MAX_ITERATIONS } from '../config/constants';
-import { sanitizeOutput, validateCommand, authorizeCommand, authorizeRule } from './safeguard';
+import { findToolMerged as findTool } from '../tools/index.js';
+import { MAX_ITERATIONS } from '../config/constants.js';
+import { sanitizeOutput, validateCommand, authorizeCommand, authorizeRule } from './safeguard.js';
 
 // 兼容 ESM __dirname
 const __filename = fileURLToPath(import.meta.url);

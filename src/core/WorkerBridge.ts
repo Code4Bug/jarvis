@@ -5,10 +5,10 @@
 import { Worker } from 'worker_threads';
 import { fileURLToPath } from 'url';
 import path from 'path';
-import { TranscriptMessage } from '../types/index';
-import { EngineCallbacks } from './QueryEngine';
+import { TranscriptMessage } from '../types/index.js';
+import { EngineCallbacks } from './QueryEngine.js';
 import { DangerConfirmResult } from './query.js';
-import { WorkerOutbound, WorkerInbound } from './queryWorker';
+import { WorkerOutbound, WorkerInbound } from './queryWorker.js';
 
 // 兼容 ESM __dirname
 const __filename = fileURLToPath(import.meta.url);

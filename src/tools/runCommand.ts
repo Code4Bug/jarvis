@@ -1,6 +1,6 @@
 import { exec, ChildProcess } from 'child_process';
-import { Tool, AbortSignal } from '../types/index';
-import { sanitizeOutput } from '../core/safeguard';
+import { Tool, AbortSignal } from '../types/index.js';
+import { sanitizeOutput } from '../core/safeguard.js';
 
 /**
  * 异步执行命令，支持通过 abortSignal 中断子进程

@@ -1,17 +1,17 @@
 import { useState, useCallback } from 'react';
-import { Message } from '../types/index';
-import { QueryEngine } from '../core/QueryEngine';
-import { filterCommands, filterAgentCommands, SlashCommand } from '../commands/index';
-import { setActiveAgent } from '../config/agentState';
-import { executeSlashCommand } from '../screens/slashCommands';
+import { Message } from '../types/index.js';
+import { QueryEngine } from '../core/QueryEngine.js';
+import { filterCommands, filterAgentCommands, SlashCommand } from '../commands/index.js';
+import { setActiveAgent } from '../config/agentState.js';
+import { executeSlashCommand } from '../screens/slashCommands.js';
 
 interface UseSlashMenuOptions {
   engineRef: React.RefObject<QueryEngine | null>;
-  sessionRef: React.MutableRefObject<import('../types/index').Session>;
+  sessionRef: React.MutableRefObject<import('../types/index.js').Session>;
   tokenCountRef: React.MutableRefObject<number>;
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
   setDisplayTokens: (n: number) => void;
-  setLoopState: React.Dispatch<React.SetStateAction<import('../types/index').LoopState | null>>;
+  setLoopState: React.Dispatch<React.SetStateAction<import('../types/index.js').LoopState | null>>;
   setIsProcessing: React.Dispatch<React.SetStateAction<boolean>>;
   setShowWelcome: React.Dispatch<React.SetStateAction<boolean>>;
   setInput: React.Dispatch<React.SetStateAction<string>>;

@@ -1,5 +1,5 @@
 import fs from 'fs';
-import { Tool } from '../types/index';
+import { Tool } from '../types/index.js';
 
 export const listDirectory: Tool = {
   name: 'list_directory',

@@ -9,14 +9,14 @@ import {
   TranscriptMessage,
   LoopState,
 } from '../types/index.js';
-import { DangerConfirmResult } from './query';
-import { WorkerBridge } from './WorkerBridge';
-import { MockService } from '../services/api/mock';
-import { LLMServiceImpl } from '../services/api/llm';
-import { loadConfig, getActiveModel } from '../config/loader';
-import { SESSIONS_DIR } from '../config/constants';
-import { setActiveAgent } from '../config/agentState';
-import { clearAuthorizations } from './safeguard';
+import { DangerConfirmResult } from './query.js';
+import { WorkerBridge } from './WorkerBridge.js';
+import { MockService } from '../services/api/mock.js';
+import { LLMServiceImpl } from '../services/api/llm.js';
+import { loadConfig, getActiveModel } from '../config/loader.js';
+import { SESSIONS_DIR } from '../config/constants.js';
+import { setActiveAgent } from '../config/agentState.js';
+import { clearAuthorizations } from './safeguard.js';
 
 export interface EngineCallbacks {
   onMessage: (msg: Message) => void;

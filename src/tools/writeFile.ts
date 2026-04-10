@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
-import { Tool } from '../types/index';
-import { detectSensitiveContent } from '../core/safeguard';
+import { Tool } from '../types/index.js';
+import { detectSensitiveContent } from '../core/safeguard.js';
 
 /**
  * 将 unified diff 补丁应用到原始文本上。

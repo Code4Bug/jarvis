@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { APP_NAME, APP_VERSION, MODEL_NAME } from '../config/constants';
+import { APP_NAME, APP_VERSION, MODEL_NAME } from '../config/constants.js';
 
 function truncatePath(p: string, max: number): string {
   if (p.length <= max) return p;
