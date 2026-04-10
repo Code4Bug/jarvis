@@ -282,8 +282,54 @@ export default function REPL() {
     }
   }, [placeholder]);
 
+  // ===== 隐藏系统默认终端光标，使用 ink 渲染的反色光标代替 =====
+  useEffect(() => {
+    process.stdout.write('\x1B[?25l');
+    return () => {
+      process.stdout.write('\x1B[?25h');
+    };
+  }, []);
+
+  // ===== processing 期间隐藏终端光标，阻止 IME composing 显示 =====
+  const isProcessingRef = useRef(isProcessing);
+  isProcessingRef.current = isProcessing;
+
+  useEffect(() => {
+    if (!isProcessing) return;
+
+    // 隐藏终端光标 — 终端 IME 的 inline composing 仅在光标可见时渲染
+    process.stdout.write('\x1B[?25l');
+
+    // 高优先级 stdin 拦截：吞掉 processing 期间的所有输入（Ctrl+C / ESC 除外）
+    // 防止字符积累在缓冲区，processing 结束后污染输入框
+    const drain = (data: Buffer | string) => {
+      if (!isProcessingRef.current) return;
+      const raw = typeof data === 'string' ? data : data.toString('utf-8');
+      // 放行 Ctrl+C 和 ESC，其余全部吞掉
+      if (raw === '\x03' || raw === '\x1B') return;
+      // 清空 Buffer 内容（仅当确实是 Buffer 时），减少后续处理的干扰
+      if (Buffer.isBuffer(data)) data.fill(0);
+    };
+    process.stdin.prependListener('data', drain);
+
+    return () => {
+      process.stdin.removeListener('data', drain);
+      // 注意：不在此处恢复终端光标，由 repl.tsx 顶层 useEffect 统一管理
+      // drain stdin 缓冲区，丢弃 processing 期间积累的数据
+      if (typeof (process.stdin as any).read === 'function') {
+        while ((process.stdin as any).read() !== null) { /* drain */ }
+      }
+    };
+  }, [isProcessing]);
+
   // ===== 快捷键 =====
   useInput((ch, key) => {
+    // processing 状态下，仅允许 Ctrl+C（退出）和 ESC（中断）
+    if (isProcessing) {
+      if (key.ctrl && ch === 'c') { handleCtrlC(); return; }
+      if (key.escape && engineRef.current) { engineRef.current.abort(); return; }
+      return; // 丢弃其他所有按键
+    }
     if (key.tab && slashMenu.slashMenuVisible) { slashMenu.handleSlashMenuSelect(); return; }
     if (key.ctrl && ch === 'c') { handleCtrlC(); return; }
     if (key.ctrl && ch === 'o') { setShowDetails((prev) => !prev); return; }

@@ -97,9 +97,16 @@ export default function MultilineInput({
   const imeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const imeInsertedLenRef = useRef(0);
 
-  // 启用 bracketed paste mode
+  // 终端光标重定位定时器（用于 IME composing 位置修正）
+  const cursorRelocTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 启用 bracketed paste mode，并在激活时清空 stdin 缓冲区
   useEffect(() => {
     if (!stdin || !isActive) return;
+    // 清空 stdin 缓冲区，丢弃 processing 期间积累的输入
+    if (typeof (stdin as any).read === 'function') {
+      while ((stdin as any).read() !== null) { /* drain */ }
+    }
     process.stdout.write('\x1B[?2004h');
     return () => {
       process.stdout.write('\x1B[?2004l');
@@ -539,10 +546,56 @@ export default function MultilineInput({
       if (imeTimerRef.current !== null) {
         clearTimeout(imeTimerRef.current);
       }
+      if (cursorRelocTimerRef.current !== null) {
+        clearTimeout(cursorRelocTimerRef.current);
+      }
     };
   }, []);
 
   useInput(() => {}, { isActive });
+
+  /**
+   * 将终端物理光标固定到当前行第 3 列，避免 IME composing 从行末溢出。
+   *
+   * 背景：ink 渲染完成后，终端光标停留在最后一行（StatusBar）末尾。
+   * macOS 终端模拟器的内联 IME 会在物理光标位置显示 composing 拼音，
+   * 若光标在行末会导致行宽溢出、TUI 布局被挤压偏移。
+   *
+   * 注意：只能移列，绝对不能移行（\x1B[1A 等）。
+   * ink 增量渲染以当前光标行为起点，移行后每次 re-render 都会导致
+   * TUI 整体上偏移一行（每次输入字符都触发 re-render）。
+   *
+   * 解决方案：仅将列定位到 3（❯ 占 2 列，输入框第一个字符从第 3 列开始），
+   * IME composing 文本从该列开始，不会从行末溢出。
+   */
+  useEffect(() => {
+    // 取消之前的定时器
+    if (cursorRelocTimerRef.current !== null) {
+      clearTimeout(cursorRelocTimerRef.current);
+    }
+
+    if (!showCursor || !isActive) {
+      // 非输入状态：将物理光标移到列 1（行首），避免 IME 候选框在可见区域弹出
+      cursorRelocTimerRef.current = setTimeout(() => {
+        cursorRelocTimerRef.current = null;
+        process.stdout.write('\x1B[1G');
+      }, 80);
+    } else {
+      // 输入激活状态：将列定位到 3（❯ 占 2 列，输入框第一个字符从第 3 列开始）
+      // 绝对不能移行，ink 增量渲染以光标行为起点，移行会导致 TUI 每次 re-render 上偏移一行
+      cursorRelocTimerRef.current = setTimeout(() => {
+        cursorRelocTimerRef.current = null;
+        process.stdout.write('\x1B[3G');
+      }, 80);
+    }
+
+    return () => {
+      if (cursorRelocTimerRef.current !== null) {
+        clearTimeout(cursorRelocTimerRef.current);
+        cursorRelocTimerRef.current = null;
+      }
+    };
+  });
 
   // --- 渲染 ---
   const isEmpty = value.length === 0;
@@ -553,6 +606,7 @@ export default function MultilineInput({
       pasteCountRef.current = 0;
       pastedChunksRef.current.clear();
     }
+    // 更新光标位置信息（空输入时光标在起始位置）
     if (showCursor && placeholder.length > 0) {
       return (
         <Box>

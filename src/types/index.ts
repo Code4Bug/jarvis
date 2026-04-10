@@ -63,7 +63,7 @@ export interface Tool {
   name: string;
   description: string;
   parameters: Record<string, ToolParameter>;
-  execute: (args: Record<string, unknown>) => Promise<string>;
+  execute: (args: Record<string, unknown>, abortSignal?: AbortSignal) => Promise<string>;
 }
 
 // ===== 会话 =====

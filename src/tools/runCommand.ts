@@ -1,16 +1,27 @@
-import { exec } from 'child_process';
-import { Tool } from '../types/index';
+import { exec, ChildProcess } from 'child_process';
+import { Tool, AbortSignal } from '../types/index';
 import { sanitizeOutput } from '../core/safeguard';
 
 /**
- * 异步执行命令，不阻塞事件循环，保证 TUI 渲染正常
+ * 异步执行命令，支持通过 abortSignal 中断子进程
  */
 function execAsync(
   command: string,
   options: { encoding: BufferEncoding; timeout: number; maxBuffer: number; env: NodeJS.ProcessEnv },
+  abortSignal?: AbortSignal,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
-    exec(command, options, (error, stdout, stderr) => {
+    const child: ChildProcess = exec(command, options, (error, stdout, stderr) => {
+      // 清理轮询
+      if (pollTimer !== null) clearInterval(pollTimer);
+
+      // 被中断时直接返回已有输出，不视为错误
+      if (abortSignal?.aborted) {
+        const partial = sanitizeOutput(String(stdout ?? '').trim());
+        resolve(partial ? `(命令被中断)\n${partial}` : '(命令被中断)');
+        return;
+      }
+
       if (error) {
         const parts: string[] = [];
         if (stderr) parts.push(`[stderr] ${sanitizeOutput(String(stderr).trim())}`);
@@ -22,6 +33,23 @@ function execAsync(
       }
       resolve(sanitizeOutput(String(stdout).trim()) || '(命令执行完成，无输出)');
     });
+
+    // 轮询 abortSignal，检测到中断时 kill 子进程
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
+    if (abortSignal) {
+      pollTimer = setInterval(() => {
+        if (abortSignal.aborted && child.pid) {
+          if (pollTimer !== null) clearInterval(pollTimer);
+          pollTimer = null;
+          // 先尝试 SIGTERM，给进程优雅退出的机会
+          try { child.kill('SIGTERM'); } catch { /* ignore */ }
+          // 500ms 后强制 SIGKILL
+          setTimeout(() => {
+            try { child.kill('SIGKILL'); } catch { /* ignore */ }
+          }, 500);
+        }
+      }, 100);
+    }
   });
 }
 
@@ -31,15 +59,14 @@ export const runCommand: Tool = {
   parameters: {
     command: { type: 'string', description: '要执行的 Bash 命令', required: true },
   },
-  execute: async (args) => {
+  execute: async (args, abortSignal?) => {
     const command = args.command as string;
-    // 安全围栏拦截已在 query 层（executeTool）统一处理，此处仅负责执行 + 脱敏
     return execAsync(command, {
       encoding: 'utf-8',
       timeout: 30000,
       maxBuffer: 1024 * 1024,
       env: sanitizeEnv(process.env),
-    });
+    }, abortSignal);
   },
 };
 

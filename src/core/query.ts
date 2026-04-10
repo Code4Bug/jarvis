@@ -90,11 +90,35 @@ export async function executeQuery(
 
     // 无工具调用 → 结束
     if (!result.toolCall) break;
-    if (abortSignal.aborted) break;
+
+    // 中断发生在推理阶段：assistant 已输出 tool_use 但尚未执行，
+    // 需要补一条 tool_result 保持 transcript 配对完整
+    if (abortSignal.aborted) {
+      const skippedResult = `[用户中断] 工具 ${result.toolCall.name} 未执行（用户按下 ESC 中断）`;
+      localTranscript.push({
+        role: 'tool_result',
+        toolUseId: result.toolCall.id,
+        content: skippedResult,
+      });
+      // 同步 UI 消息
+      const skipMsgId = uuid();
+      callbacks.onMessage({
+        id: skipMsgId,
+        type: 'tool_exec',
+        status: 'aborted',
+        content: `${result.toolCall.name} 已跳过（用户中断）`,
+        timestamp: Date.now(),
+        toolName: result.toolCall.name,
+        toolArgs: result.toolCall.input,
+        toolResult: skippedResult,
+        abortHint: '命令已跳过（ESC）',
+      });
+      break;
+    }
 
     // 执行工具
     const tc = result.toolCall;
-    const toolResult = await executeTool(tc, callbacks);
+    const toolResult = await executeTool(tc, callbacks, abortSignal);
     localTranscript.push({
       role: 'tool_result',
       toolUseId: tc.id,
@@ -241,6 +265,7 @@ async function runOneIteration(
 async function executeTool(
   tc: ToolCallInfo,
   callbacks: QueryCallbacks,
+  abortSignal?: { aborted: boolean },
 ): Promise<{ content: string; isError: boolean }> {
   const toolExecId = uuid();
   // 对 Bash / Skill 工具使用更直观的显示格式
@@ -310,19 +335,30 @@ async function executeTool(
 
   try {
     const start = Date.now();
-    const result = await tool.execute(tc.input);
+    const result = await tool.execute(tc.input, abortSignal);
     // 对工具输出统一脱敏
     const safeResult = sanitizeOutput(result);
-    const doneContent = tc.name === 'Bash' && tc.input.command
-      ? `Bash(${tc.input.command}) 执行完成`
-      : isSkill
-        ? `${skillName}(${skillArgsSummary}) 执行完成`
-        : `工具 ${tc.name} 执行完成`;
+
+    // 工具执行期间被中断
+    const wasAborted = abortSignal?.aborted;
+    const doneContent = wasAborted
+      ? (tc.name === 'Bash' && tc.input.command
+        ? `Bash(${tc.input.command}) 已中断`
+        : isSkill
+          ? `${skillName}(${skillArgsSummary}) 已中断`
+          : `工具 ${tc.name} 已中断`)
+      : (tc.name === 'Bash' && tc.input.command
+        ? `Bash(${tc.input.command}) 执行完成`
+        : isSkill
+          ? `${skillName}(${skillArgsSummary}) 执行完成`
+          : `工具 ${tc.name} 执行完成`);
+
     callbacks.onUpdateMessage(toolExecId, {
-      status: 'success',
+      status: wasAborted ? 'aborted' : 'success',
       content: doneContent,
       toolResult: safeResult,
       duration: Date.now() - start,
+      ...(wasAborted ? { abortHint: '命令已中断（ESC）' } : {}),
     });
     return { content: safeResult, isError: false };
   } catch (err: any) {
