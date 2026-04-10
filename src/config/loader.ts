@@ -18,6 +18,8 @@ export interface ModelConfig {
   model: string;
   temperature?: number;
   max_tokens?: number;
+  /** 额外请求体参数，会直接合并到 API 请求 body 中（如 enable_thinking、chat_template_kwargs 等） */
+  extra_body?: Record<string, unknown>;
 }
 
 export interface SystemConfig {

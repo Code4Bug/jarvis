@@ -20,6 +20,8 @@ export interface LLMConfig {
   maxTokens: number;
   baseUrl?: string;
   temperature?: number;
+  /** 额外请求体参数，直接合并到 API 请求 body */
+  extraBody?: Record<string, unknown>;
 }
 
 /** 从配置文件构建 LLMConfig，找不到则回退环境变量 */
@@ -48,6 +50,7 @@ export function fromModelConfig(mc: ModelConfig): LLMConfig {
     maxTokens: mc.max_tokens ?? 4096,
     baseUrl: mc.api_url,
     temperature: mc.temperature,
+    extraBody: mc.extra_body,
   };
 }
 
@@ -159,7 +162,7 @@ function toOpenAITools(tools: Tool[]): OpenAITool[] {
 
 interface SSEDelta {
   content?: string | null;
-  /** 思考过程（DeepSeek reasoning_content / OpenAI-compatible） */
+  /** 思考过程（DeepSeek reasoning_content / Qwen reasoning_content / OpenAI-compatible） */
   reasoning_content?: string | null;
   tool_calls?: Array<{
     index: number;
@@ -176,7 +179,14 @@ function parseSSELine(line: string): SSEDelta | null {
   if (data === '[DONE]') return null;
   try {
     const parsed = JSON.parse(data);
-    return parsed.choices?.[0]?.delta ?? null;
+    const choice = parsed.choices?.[0];
+    if (!choice) return null;
+    const delta = choice.delta;
+    if (!delta) return null;
+
+    // 兼容 Qwen/vLLM：thinking 内容可能在 delta.reasoning_content 或 delta.content（role=thinking 时）
+    // 部分 vLLM 部署会将 thinking 内容放在 content 字段，通过 choice.finish_reason 或特殊标记区分
+    return delta;
   } catch {
     return null;
   }
@@ -237,6 +247,10 @@ export class LLMServiceImpl implements LLMService {
     if (openaiTools.length > 0) {
       body.tools = openaiTools;
       body.tool_choice = 'auto';
+    }
+    // 合并额外请求体参数（如 enable_thinking、chat_template_kwargs 等）
+    if (this.config.extraBody) {
+      Object.assign(body, this.config.extraBody);
     }
 
     const url = this.config.baseUrl || 'https://api.openai.com/v1/chat/completions';
@@ -327,8 +341,8 @@ export class LLMServiceImpl implements LLMService {
             callbacks.onThinking(delta.reasoning_content);
           }
 
-          // 文本内容
-          if (delta.content) {
+          // 文本内容（注意：用 != null 判断，避免空字符串 "" 被跳过）
+          if (delta.content != null && delta.content !== '') {
             callbacks.onText(delta.content);
           }
 

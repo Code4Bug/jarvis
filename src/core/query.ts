@@ -151,6 +151,7 @@ async function runOneIteration(
         onThinking: (text) => {
           if (abortSignal.aborted) { safeResolve(); return; }
           accumulatedThinking += text;
+          tokenCount++; // thinking token 也计入统计
           // 实时更新 thinking 消息内容，让用户看到思考过程
           callbacks.onUpdateMessage(thinkingId, { content: accumulatedThinking });
         },
@@ -209,9 +210,31 @@ async function runOneIteration(
       tokensPerSecond,
       ...(isAborted ? { abortHint: '推理已中断（ESC）' } : {}),
     });
+  } else if (accumulatedThinking && !toolCall) {
+    // 模型只输出了 thinking 内容但没有 content（常见于 Qwen3.5 thinking 模式）
+    // 将 thinking 内容作为回复展示，避免用户看到空白
+    const isAborted = abortSignal.aborted;
+    callbacks.onClearStreamText?.();
+    callbacks.onStreamText(accumulatedThinking);
+    callbacks.onClearStreamText?.();
+    callbacks.onMessage({
+      id: uuid(),
+      type: 'reasoning',
+      status: isAborted ? 'aborted' : 'success',
+      content: accumulatedThinking,
+      timestamp: Date.now(),
+      duration,
+      tokenCount,
+      firstTokenLatency,
+      tokensPerSecond,
+      ...(isAborted ? { abortHint: '推理已中断（ESC）' } : {}),
+    });
   }
 
-  return { text: accumulatedText, toolCall, duration, tokenCount, firstTokenLatency, tokensPerSecond };
+  // 如果模型只输出了 thinking 但没有 content，将 thinking 作为 text 回填（保证 transcript 不丢失）
+  const effectiveText = accumulatedText || (accumulatedThinking && !toolCall ? accumulatedThinking : '');
+
+  return { text: effectiveText, toolCall, duration, tokenCount, firstTokenLatency, tokensPerSecond };
 }
 
 /** 执行工具并返回结果 */
