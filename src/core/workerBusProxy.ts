@@ -50,7 +50,7 @@ export const workerBusProxy = {
   getOffset(channel: string): Promise<number> {
     return new Promise((resolve) => {
       const reqId = requestId();
-      pendingBusRequests.set(reqId, (offset) => resolve(offset));
+      pendingBusRequests.set(reqId, (offset: number) => resolve(offset));
       send({ type: 'bus_get_offset', requestId: reqId, channel });
     });
   },
@@ -60,14 +60,6 @@ export const workerBusProxy = {
       const reqId = requestId();
       pendingBusRequests.set(reqId, (channels) => resolve(channels));
       send({ type: 'bus_list_channels', requestId: reqId });
-    });
-  },
-
-  getOffset(channel: string): Promise<number> {
-    return new Promise((resolve) => {
-      const reqId = requestId();
-      pendingBusRequests.set(reqId, (offset) => resolve(offset));
-      send({ type: 'bus_get_offset', requestId: reqId, channel });
     });
   },
 };
