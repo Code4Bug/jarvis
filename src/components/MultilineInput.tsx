@@ -47,6 +47,12 @@ interface MultilineInputProps {
   onSlashMenuClose?: () => void;
   /** 输入为空时按 Tab 的回调（用于填入 placeholder） */
   onTabFillPlaceholder?: () => void;
+  /**
+   * 输入框下方的行数（分隔线 + StatusBar 等），用于将终端物理光标
+   * 上移到输入框行，使 IME composing 显示在正确位置而非状态栏上。
+   * 默认值 2（底部分隔线 1 行 + StatusBar 1 行）。
+   */
+  rowsBelow?: number;
 }
 
 /**
@@ -74,6 +80,7 @@ export default function MultilineInput({
   onSlashMenuSelect,
   onSlashMenuClose,
   onTabFillPlaceholder,
+  rowsBelow = 2,
 }: MultilineInputProps) {
   const { stdin } = useStdin();
   const [cursor, setCursor] = useState(value.length);
@@ -581,11 +588,16 @@ export default function MultilineInput({
         process.stdout.write('\x1B[1G');
       }, 80);
     } else {
-      // 输入激活状态：将列定位到 3（❯ 占 2 列，输入框第一个字符从第 3 列开始）
-      // 绝对不能移行，ink 增量渲染以光标行为起点，移行会导致 TUI 每次 re-render 上偏移一行
+      // 输入激活状态：
+      // 1. 上移 rowsBelow 行，到达输入框所在行
+      // 2. 将列定位到 3（❯ 占 2 列，输入框第一个字符从第 3 列开始）
+      // 3. 下移 rowsBelow 行，回到原来的光标行（ink 渲染起点不变）
+      // 这样 IME composing 显示在输入框行而非 StatusBar 行
       cursorRelocTimerRef.current = setTimeout(() => {
         cursorRelocTimerRef.current = null;
-        process.stdout.write('\x1B[3G');
+        const up = rowsBelow > 0 ? `\x1B[${rowsBelow}A` : '';
+        const down = rowsBelow > 0 ? `\x1B[${rowsBelow}B` : '';
+        process.stdout.write(`${up}\x1B[3G${down}`);
       }, 80);
     }
 

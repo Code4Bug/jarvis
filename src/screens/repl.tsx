@@ -290,6 +290,14 @@ export default function REPL() {
     };
   }, []);
 
+  // ===== processing/streaming 期间，每次 re-render 后将物理光标移到行首 =====
+  // ink 每次渲染后光标停在 StatusBar 行末，macOS IME 会在该位置显示 composing 候选框，
+  // 导致候选框与进度条重叠。将光标移到列 1（行首）让候选框出现在屏幕左侧空白区域。
+  useEffect(() => {
+    if (!isProcessing) return;
+    process.stdout.write('\x1B[1G');
+  });
+
   // ===== processing 期间隐藏终端光标，阻止 IME composing 显示 =====
   const isProcessingRef = useRef(isProcessing);
   isProcessingRef.current = isProcessing;
