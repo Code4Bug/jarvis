@@ -17,6 +17,7 @@ import { loadConfig, getActiveModel } from '../config/loader.js';
 import { SESSIONS_DIR } from '../config/constants.js';
 import { setActiveAgent } from '../config/agentState.js';
 import { clearAuthorizations } from './safeguard.js';
+import { agentUIBus } from './AgentRegistry.js';
 
 export interface EngineCallbacks {
   onMessage: (msg: Message) => void;
@@ -28,6 +29,10 @@ export interface EngineCallbacks {
   onSessionUpdate: (session: Session) => void;
   /** 危险命令交互式确认 */
   onConfirmDangerousCommand?: (command: string, reason: string, ruleName: string) => Promise<DangerConfirmResult>;
+  /** SubAgent 产生消息时推送到 UI（带 subAgentId 前缀） */
+  onSubAgentMessage?: (msg: Message) => void;
+  /** SubAgent 更新已有消息 */
+  onSubAgentUpdateMessage?: (id: string, updates: Partial<Message>) => void;
 }
 
 export class QueryEngine {
@@ -53,6 +58,14 @@ export class QueryEngine {
 
     this.session = this.createSession();
     this.ensureSessionDir();
+  }
+
+  /** 注册持久 UI 回调，供后台 spawn_agent 子 Agent 推送消息 */
+  registerUIBus(
+    onMessage: (msg: Message) => void,
+    onUpdateMessage: (id: string, updates: Partial<Message>) => void,
+  ): void {
+    agentUIBus.register(onMessage, onUpdateMessage);
   }
 
   private createSession(): Session {
@@ -100,6 +113,12 @@ export class QueryEngine {
       onLoopStateChange: callbacks.onLoopStateChange,
       onSessionUpdate: callbacks.onSessionUpdate,
       onConfirmDangerousCommand: callbacks.onConfirmDangerousCommand,
+      onSubAgentMessage: (msg) => {
+        // SubAgent 消息也存入会话，方便持久化
+        this.session.messages.push(msg);
+        callbacks.onSubAgentMessage?.(msg);
+      },
+      onSubAgentUpdateMessage: callbacks.onSubAgentUpdateMessage,
     };
 
     try {

@@ -79,6 +79,9 @@ function MessageItem({ msg, showDetails = false }: { msg: Message; showDetails?:
       <Box flexDirection="column" marginBottom={0}>
         <Box>
           <Text color="cyan">{'○'} </Text>
+          {msg.subAgentId && (
+            <Text color="blue" dimColor>{msg.subAgentId} › </Text>
+          )}
           <Text color="gray">Thinking</Text>
           <Text color="gray" dimColor> ({msg.think.length} chars)</Text>
           {!showDetails && <Text color="gray" dimColor>  [Ctrl+O 展开]</Text>}
@@ -105,12 +108,17 @@ function MessageItem({ msg, showDetails = false }: { msg: Message; showDetails?:
     const toolLabel = isBash && bashCmd ? `Bash(${bashCmd})` : (msg.toolName || 'tool');
     // 并行组标识
     const isParallel = !!msg.parallelGroupId;
+    // SubAgent 前缀，例如 "代码审查Agent"
+    const subAgentPrefix = msg.subAgentId ? `${msg.subAgentId} - ` : '';
 
     return (
       <Box flexDirection="column" marginBottom={1}>
         <Box>
           {isParallel && <Text color="cyan" dimColor>⇉ </Text>}
           <Text color={dotColor}>{dot} </Text>
+          {subAgentPrefix ? (
+            <Text color="blue" dimColor>{subAgentPrefix}</Text>
+          ) : null}
           {isBash && bashCmd ? (
             <Text><Text color="white" bold>Bash</Text><Text color="gray">({bashCmd})</Text></Text>
           ) : isSkill ? (
@@ -148,12 +156,25 @@ function MessageItem({ msg, showDetails = false }: { msg: Message; showDetails?:
   if (msg.type === 'reasoning') {
     return (
       <Box flexDirection="column" marginBottom={1}>
-        <Box>
-          <Text color={dotColor}>{dot}</Text>
-          <Box marginLeft={1}>
-            <MarkdownText text={msg.content} />
+        {msg.subAgentId ? (
+          // 有 subAgentId 时：标题行 + 内容分两行，避免内容粘连
+          <>
+            <Box>
+              <Text color={dotColor}>{dot} </Text>
+              <Text color="blue" dimColor>{msg.subAgentId} › </Text>
+            </Box>
+            <Box marginLeft={2} flexDirection="column">
+              <MarkdownText text={msg.content} />
+            </Box>
+          </>
+        ) : (
+          <Box flexDirection="row" alignItems="flex-start">
+            <Text color={dotColor}>{dot} </Text>
+            <Box flexDirection="column" flexShrink={1}>
+              <MarkdownText text={msg.content} />
+            </Box>
           </Box>
-        </Box>
+        )}
         <MessageStats msg={msg} show={showDetails} />
       </Box>
     );
@@ -162,11 +183,9 @@ function MessageItem({ msg, showDetails = false }: { msg: Message; showDetails?:
   if (msg.status !== 'pending' && msg.content) {
     return (
       <Box flexDirection="column">
-        <Box>
-          <Text color={dotColor}>{dot}</Text>
-          <Box marginLeft={1}>
-            <MarkdownText text={msg.content} color="gray" />
-          </Box>
+        <Text color={dotColor}>{dot}</Text>
+        <Box marginLeft={2} flexDirection="column">
+          <MarkdownText text={msg.content} color="gray" />
         </Box>
         <MessageStats msg={msg} show={showDetails} />
       </Box>

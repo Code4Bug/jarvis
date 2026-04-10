@@ -5,6 +5,7 @@ import { MODEL_NAME, PROJECT_NAME, ENABLE_THINKING_MODE_TOGGLE, CONTEXT_TOKEN_LI
 interface StatusBarProps {
   width: number;
   totalTokens: number;
+  activeAgents?: number;
 }
 
 /** 生成 token 用量进度条 */
@@ -17,22 +18,24 @@ function tokenProgressBar(used: number, limit: number, barWidth: number): { bar:
   return { bar, color };
 }
 
-function StatusBar({ width, totalTokens }: StatusBarProps) {
+function StatusBar({ width, totalTokens, activeAgents = 0 }: StatusBarProps) {
   const left = ` ${MODEL_NAME} │ ${PROJECT_NAME}`;
 
-  // 右侧：token 进度条 + 思考模式切换（可选）
+  // 右侧：智能体数量（有后台 Agent 时显示）+ token 进度条 + 思考模式切换（可选）
+  const agentPart = activeAgents > 0 ? `⬡ ${activeAgents} agent${activeAgents > 1 ? 's' : ''} │ ` : '';
   const tokenLabel = `${totalTokens}/${CONTEXT_TOKEN_LIMIT}`;
   const barWidth = 10;
   const { bar, color } = tokenProgressBar(totalTokens, CONTEXT_TOKEN_LIMIT, barWidth);
   const effortPart = ENABLE_THINKING_MODE_TOGGLE ? ' │ ● medium · /effort' : '';
   // 右侧完整文本长度（用于计算间距）
-  const rightLen = tokenLabel.length + 1 + barWidth + effortPart.length + 1;
+  const rightLen = agentPart.length + tokenLabel.length + 1 + barWidth + effortPart.length + 1;
   const gap = Math.max(width - left.length - rightLen, 1);
 
   return (
     <Box>
       <Text color="gray">{left}</Text>
       <Text>{' '.repeat(gap)}</Text>
+      {activeAgents > 0 && <Text color="cyan">{agentPart}</Text>}
       <Text color="gray">{tokenLabel} </Text>
       <Text color={color}>{bar}</Text>
       {ENABLE_THINKING_MODE_TOGGLE && <Text color="gray">{effortPart}</Text>}

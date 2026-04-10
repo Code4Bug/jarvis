@@ -22,6 +22,8 @@ export interface LLMConfig {
   temperature?: number;
   /** 额外请求体参数，直接合并到 API 请求 body */
   extraBody?: Record<string, unknown>;
+  /** 直接指定 system prompt，跳过 agent 文件加载（SubAgent 场景使用） */
+  systemPrompt?: string;
 }
 
 /** 从配置文件构建 LLMConfig，找不到则回退环境变量 */
@@ -204,6 +206,12 @@ export class LLMServiceImpl implements LLMService {
       throw new Error('API_KEY 未配置。请在 .jarvis/config.json 或环境变量中设置。');
     }
 
+    // 若外部直接传入 systemPrompt（SubAgent 场景），直接使用，跳过 agent 文件加载
+    if (this.config.systemPrompt) {
+      this.systemPrompt = this.config.systemPrompt;
+      return;
+    }
+
     // 从当前激活的智能体加载 system prompt（运行时动态读取）
     const currentAgent = getActiveAgent(DEFAULT_AGENT);
     const agent = getAgent(currentAgent);
@@ -223,7 +231,18 @@ export class LLMServiceImpl implements LLMService {
     // 追加系统环境信息，帮助 LLM 感知用户运行环境
     const systemInfo = getSystemInfoPrompt();
 
-    this.systemPrompt = agentPrompt + roleBoundary + systemInfo;
+    // 追加当前激活模型信息
+    const jarvisCfg = loadConfig();
+    const activeModelCfg = getActiveModel(jarvisCfg);
+    const activeModelKey = jarvisCfg.system.model ?? 'unknown';
+    const modelInfo =
+      '\n\n---\n[当前模型] 以下是本次会话使用的 LLM 模型信息：' +
+      `\n- 模型标识: ${activeModelKey}` +
+      `\n- 模型名称: ${activeModelCfg?.model ?? 'unknown'}` +
+      `\n- API 地址: ${activeModelCfg?.api_url ?? 'unknown'}` +
+      `\n- 最大 Token: ${activeModelCfg?.max_tokens ?? 'unknown'}`;
+
+    this.systemPrompt = agentPrompt + roleBoundary + systemInfo + modelInfo;
   }
 
   async streamMessage(

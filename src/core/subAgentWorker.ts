@@ -1,64 +1,71 @@
 /**
- * Worker 线程入口 — 在独立线程中执行 executeQuery
- * 通过 parentPort.postMessage 将回调事件传回主线程
+ * SubAgent Worker 线程入口
+ *
+ * 每个 SubAgent 运行在独立线程中，拥有完整的 react_loop 能力。
+ * 通过 parentPort 与主线程（SubAgentBridge）双向通信。
+ *
+ * 消息协议：
+ *   主线程 → Worker：SubAgentInbound
+ *   Worker → 主线程：SubAgentOutbound
  */
-import { parentPort, workerData } from 'worker_threads';
+import { parentPort } from 'worker_threads';
 import { executeQuery, QueryCallbacks, DangerConfirmResult } from './query.js';
 import { getAllTools } from '../tools/index.js';
-import { LLMServiceImpl } from '../services/api/llm.js';
+import { LLMServiceImpl, fromModelConfig } from '../services/api/llm.js';
 import { MockService } from '../services/api/mock.js';
 import { loadConfig, getActiveModel } from '../config/loader.js';
-import { TranscriptMessage, Message, LoopState, Session } from '../types/index.js';
+import { TranscriptMessage, Message, LoopState, SubAgentTask } from '../types/index.js';
 import { BusMessage } from './AgentMessageBus.js';
 import { pendingBusRequests } from './workerBusProxy.js';
-import { pendingSpawnRequests } from './spawnRegistry.js';
 
-if (!parentPort) throw new Error('queryWorker must run inside worker_threads');
+if (!parentPort) throw new Error('subAgentWorker must run inside worker_threads');
 
 // ===== 消息类型定义 =====
 
-export type WorkerInbound =
-  | { type: 'run'; userInput: string; transcript: TranscriptMessage[] }
+export type SubAgentInbound =
+  | { type: 'run'; task: SubAgentTask }
   | { type: 'abort' }
   | { type: 'danger_confirm_result'; requestId: string; choice: DangerConfirmResult }
-  // MessageBus IPC 回复（主线程 → queryWorker）
+  // MessageBus IPC 回复
   | { type: 'bus_publish_ack'; requestId: string }
   | { type: 'bus_subscribe_result'; requestId: string; message: BusMessage | null }
   | { type: 'bus_read_history_result'; requestId: string; messages: BusMessage[] }
   | { type: 'bus_get_offset_result'; requestId: string; offset: number }
-  | { type: 'bus_list_channels_result'; requestId: string; channels: string[] }
-  // spawn_subagent IPC 回复（主线程 → queryWorker）
-  | { type: 'spawn_subagent_result'; requestId: string; result: string };
+  | { type: 'bus_list_channels_result'; requestId: string; channels: string[] };
 
-export type WorkerOutbound =
-  | { type: 'message'; msg: Message }
-  | { type: 'update_message'; id: string; updates: Partial<Message> }
-  | { type: 'stream_text'; text: string }
-  | { type: 'clear_stream_text' }
-  | { type: 'loop_state'; state: LoopState }
-  | { type: 'session_update'; session: Session }
-  | { type: 'danger_confirm_request'; requestId: string; command: string; reason: string; ruleName: string }
-  | { type: 'subagent_message'; msg: Message }
-  | { type: 'subagent_update_message'; id: string; updates: Partial<Message> }
-  // MessageBus IPC 请求（queryWorker → 主线程代理）
+export type SubAgentOutbound =
+  | { type: 'message'; taskId: string; msg: Message }
+  | { type: 'update_message'; taskId: string; id: string; updates: Partial<Message> }
+  | { type: 'stream_text'; taskId: string; text: string }
+  | { type: 'loop_state'; taskId: string; state: LoopState }
+  | { type: 'danger_confirm_request'; taskId: string; requestId: string; command: string; reason: string; ruleName: string }
+  // MessageBus IPC 请求（Worker → 主线程代理）
   | { type: 'bus_publish'; requestId: string; from: string; channel: string; payload: string }
   | { type: 'bus_subscribe'; requestId: string; channel: string; timeoutMs: number; fromOffset?: number }
   | { type: 'bus_read_history'; requestId: string; channel: string; limit?: number }
   | { type: 'bus_get_offset'; requestId: string; channel: string }
   | { type: 'bus_list_channels'; requestId: string }
-  // spawn_subagent IPC 请求（queryWorker → 主线程，在主线程创建 SubAgentBridge）
-  | { type: 'spawn_subagent'; requestId: string; taskId: string; instruction: string; agentLabel: string; allowedTools?: string[] }
-  | { type: 'done'; transcript: TranscriptMessage[] }
-  | { type: 'error'; message: string };
+  | { type: 'done'; taskId: string; transcript: TranscriptMessage[] }
+  | { type: 'error'; taskId: string; message: string };
 
 // ===== 初始化 LLM 服务 =====
 const config = loadConfig();
 const activeModel = getActiveModel(config);
-let service: InstanceType<typeof LLMServiceImpl> | InstanceType<typeof MockService>;
-try {
-  service = activeModel ? new LLMServiceImpl() : new MockService();
-} catch {
-  service = new MockService();
+
+function buildSubAgentService(role?: string, customSystemPrompt?: string) {
+  const systemPrompt = customSystemPrompt
+    ?? (role
+      ? `${role}\n\n你是一个专注的子任务执行助手。请严格按照任务指令完成工作，输出结构化结果。`
+      : '你是一个专注的子任务执行助手。请严格按照任务指令完成工作，输出结构化结果。');
+
+  if (activeModel) {
+    try {
+      return new LLMServiceImpl({ ...fromModelConfig(activeModel), systemPrompt });
+    } catch {
+      return new MockService();
+    }
+  }
+  return new MockService();
 }
 
 // ===== 中断信号 =====
@@ -68,7 +75,7 @@ const abortSignal = { aborted: false };
 const pendingConfirms = new Map<string, (choice: DangerConfirmResult) => void>();
 
 // ===== 监听主线程消息 =====
-parentPort.on('message', async (msg: WorkerInbound) => {
+parentPort.on('message', async (msg: SubAgentInbound) => {
   if (msg.type === 'abort') {
     abortSignal.aborted = true;
     return;
@@ -103,50 +110,46 @@ parentPort.on('message', async (msg: WorkerInbound) => {
     return;
   }
 
-  // spawn_subagent IPC 回复 → 转发给 pendingSpawnRequests
-  if (msg.type === 'spawn_subagent_result') {
-    const resolve = pendingSpawnRequests.get(msg.requestId);
-    if (resolve) {
-      pendingSpawnRequests.delete(msg.requestId);
-      resolve(msg.result);
-    }
-    return;
-  }
-
   if (msg.type === 'run') {
     abortSignal.aborted = false;
+    const { task } = msg;
+    const { taskId, instruction, allowedTools, contextTranscript, role, systemPrompt } = task;
 
-    const send = (out: WorkerOutbound) => parentPort!.postMessage(out);
+    const send = (out: SubAgentOutbound) => parentPort!.postMessage(out);
+
+    const service = buildSubAgentService(role, systemPrompt);
+
+    const tools = getAllTools().filter((t) =>
+      !allowedTools || allowedTools.length === 0 || allowedTools.includes(t.name),
+    );
 
     const callbacks: QueryCallbacks = {
-      onMessage: (m) => send({ type: 'message', msg: m }),
-      onUpdateMessage: (id, updates) => send({ type: 'update_message', id, updates }),
-      onStreamText: (text) => send({ type: 'stream_text', text }),
-      onClearStreamText: () => send({ type: 'clear_stream_text' }),
-      onLoopStateChange: (state) => send({ type: 'loop_state', state }),
+      onMessage: (m) => send({ type: 'message', taskId, msg: m }),
+      onUpdateMessage: (id, updates) => send({ type: 'update_message', taskId, id, updates }),
+      onStreamText: (text) => send({ type: 'stream_text', taskId, text }),
+      onClearStreamText: () => {},
+      onLoopStateChange: (state) => send({ type: 'loop_state', taskId, state }),
       onConfirmDangerousCommand: (command, reason, ruleName) => {
         return new Promise<DangerConfirmResult>((resolve) => {
           const requestId = `${Date.now()}-${Math.random()}`;
           pendingConfirms.set(requestId, resolve);
-          send({ type: 'danger_confirm_request', requestId, command, reason, ruleName });
+          send({ type: 'danger_confirm_request', taskId, requestId, command, reason, ruleName });
         });
       },
-      onSubAgentMessage: (msg) => send({ type: 'subagent_message', msg }),
-      onSubAgentUpdateMessage: (id, updates) => send({ type: 'subagent_update_message', id, updates }),
     };
 
     try {
       const newTranscript = await executeQuery(
-        msg.userInput,
-        msg.transcript,
-        getAllTools(),
+        instruction,
+        contextTranscript ?? [],
+        tools,
         service,
         callbacks,
         abortSignal,
       );
-      send({ type: 'done', transcript: newTranscript });
+      send({ type: 'done', taskId, transcript: newTranscript });
     } catch (err: any) {
-      send({ type: 'error', message: err.message ?? '未知错误' });
+      send({ type: 'error', taskId, message: err.message ?? '未知错误' });
     }
   }
 });

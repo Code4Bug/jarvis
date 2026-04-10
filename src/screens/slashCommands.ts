@@ -98,7 +98,8 @@ export function executeSlashCommand(cmdName: string): Message | null {
 
       parts.push('### Built-in Tools\n');
       allTools.forEach((t, i) => {
-        parts.push(`${i + 1}. \`${t.name}\` - ${t.description.slice(0, 60)}`);
+        const summary = t.description.split('\n')[0].slice(0, 80);
+        parts.push(`${i + 1}. \`${t.name}\` - ${summary}`);
       });
 
       parts.push('');

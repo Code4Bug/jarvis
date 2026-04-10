@@ -29,6 +29,11 @@ export function useTokenDisplay() {
     tokenCountRef.current = count;
   }, []);
 
+  const syncTokenDisplay = useCallback((count: number) => {
+    tokenCountRef.current = count;
+    setDisplayTokens(count);
+  }, []);
+
   const resetTokens = useCallback(() => {
     tokenCountRef.current = 0;
     setDisplayTokens(0);
@@ -45,6 +50,7 @@ export function useTokenDisplay() {
     startTokenTimer,
     stopTokenTimer,
     updateTokenCount,
+    syncTokenDisplay,
     resetTokens,
   };
 }

@@ -12,7 +12,7 @@ import {
   ToolCallInfo,
 } from '../types/index.js';
 import { findToolMerged as findTool } from '../tools/index.js';
-import { MAX_ITERATIONS } from '../config/constants.js';
+import { MAX_ITERATIONS, CONTEXT_TOKEN_LIMIT } from '../config/constants.js';
 import { sanitizeOutput, validateCommand, authorizeCommand, authorizeRule } from './safeguard.js';
 
 // 兼容 ESM __dirname
@@ -21,6 +21,72 @@ const __dirname = path.dirname(__filename);
 
 /** 危险命令确认结果 */
 export type DangerConfirmResult = 'once' | 'always' | 'cancel';
+
+// ===== Transcript 上下文压缩 =====
+
+/**
+ * 粗略估算字符串的 token 数（按 4 字符/token 估算，中文按 2 字符/token）
+ * 仅用于判断是否需要压缩，不要求精确
+ */
+function estimateTokens(text: string): number {
+  // 中文字符占比高时每字约 1.5 token，英文约 0.25 token/char
+  const cjk = (text.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
+  const rest = text.length - cjk;
+  return Math.ceil(cjk * 1.5 + rest * 0.25);
+}
+
+/**
+ * 对 transcript 中的 tool_result 做滑动压缩：
+ * - 保留最近 N 条 tool_result 完整内容
+ * - 更早的 tool_result 截断到 maxOldChars 字符
+ * - 确保总估算 token 不超过 CONTEXT_TOKEN_LIMIT
+ */
+function compressTranscript(transcript: TranscriptMessage[]): TranscriptMessage[] {
+  // 单条工具结果最大字符数
+  const MAX_TOOL_RESULT_CHARS = 3000;
+  // 旧条目压缩到的字符数
+  const MAX_OLD_TOOL_RESULT_CHARS = 800;
+  // 保留最近几条完整
+  const KEEP_RECENT = 2;
+
+  // 先对所有 tool_result 做单条截断
+  let result = transcript.map((msg) => {
+    if (msg.role !== 'tool_result') return msg;
+    const content = msg.content as string;
+    if (content.length <= MAX_TOOL_RESULT_CHARS) return msg;
+    return {
+      ...msg,
+      content: content.slice(0, MAX_TOOL_RESULT_CHARS) + `\n...[已截断，原始长度 ${content.length} 字符]`,
+    };
+  });
+
+  // 估算总 token，超限则压缩旧 tool_result
+  const totalTokens = estimateTokens(result.map((m) => {
+    if (typeof m.content === 'string') return m.content;
+    return JSON.stringify(m.content);
+  }).join(''));
+
+  if (totalTokens <= CONTEXT_TOKEN_LIMIT) return result;
+
+  // 找出所有 tool_result 的索引，保留最近 KEEP_RECENT 条，其余压缩
+  const toolResultIndices = result
+    .map((m, i) => (m.role === 'tool_result' ? i : -1))
+    .filter((i) => i >= 0);
+
+  const toCompress = toolResultIndices.slice(0, Math.max(0, toolResultIndices.length - KEEP_RECENT));
+
+  result = result.map((msg, i) => {
+    if (!toCompress.includes(i)) return msg;
+    const content = msg.content as string;
+    if (content.length <= MAX_OLD_TOOL_RESULT_CHARS) return msg;
+    return {
+      ...msg,
+      content: content.slice(0, MAX_OLD_TOOL_RESULT_CHARS) + `\n...[已压缩]`,
+    };
+  });
+
+  return result;
+}
 
 export interface QueryCallbacks {
   onMessage: (msg: Message) => void;
@@ -36,6 +102,10 @@ export interface QueryCallbacks {
    * @param ruleName 匹配的规则名
    */
   onConfirmDangerousCommand?: (command: string, reason: string, ruleName: string) => Promise<DangerConfirmResult>;
+  /** SubAgent 产生消息时透传到主线程 UI（由 dispatch_subagent 工具触发） */
+  onSubAgentMessage?: (msg: Message) => void;
+  /** SubAgent 更新已有消息时透传 */
+  onSubAgentUpdateMessage?: (id: string, updates: Partial<Message>) => void;
 }
 
 /**
@@ -64,7 +134,7 @@ export async function executeQuery(
     loopState.iteration++;
     callbacks.onLoopStateChange({ ...loopState });
 
-    const result = await runOneIteration(localTranscript, _tools, service, callbacks, abortSignal);
+    const result = await runOneIteration(compressTranscript(localTranscript), _tools, service, callbacks, abortSignal);
 
     // 构建 assistant transcript 块
     const assistantBlocks: ContentBlock[] = [];
@@ -99,6 +169,11 @@ export async function executeQuery(
     let toolResults: Array<{ tc: ToolCallInfo; content: string; isError: boolean }>;
     if (result.toolCalls.length > 1 && canRunInParallel(result.toolCalls)) {
       toolResults = await executeToolsInParallel(result.toolCalls, callbacks, abortSignal);
+    } else if (result.toolCalls.length > 1 && canRunInParallelDirect(result.toolCalls)) {
+      // dispatch_subagent 等需要 toolCallbacks 的工具：用 executeTool 并行执行
+      toolResults = await Promise.all(
+        result.toolCalls.map((tc) => executeTool(tc, callbacks, abortSignal).then((r) => ({ tc, ...r }))),
+      );
     } else {
       toolResults = [];
       for (const tc of result.toolCalls) {
@@ -250,6 +325,9 @@ async function runOneIteration(
 
 /** 判断一组工具调用是否可以并行执行（无写-写冲突、无读-写冲突） */
 function canRunInParallel(calls: ToolCallInfo[]): boolean {
+  // run_agent / spawn_agent 需要 toolCallbacks 传递消息，不能走 runToolInWorker 路径
+  if (calls.some((c) => c.name === 'run_agent' || c.name === 'spawn_agent')) return false;
+
   // 写操作工具集合
   const WRITE_TOOLS = new Set(['WriteFile', 'Bash']);
   // 读操作工具集合
@@ -273,6 +351,15 @@ function canRunInParallel(calls: ToolCallInfo[]): boolean {
 
   // 其余情况（如多个只读 skill）允许并行
   return true;
+}
+
+/**
+ * 判断是否可以用 executeTool 直接并行（适用于 dispatch_subagent 等需要 toolCallbacks 的工具）
+ * 这些工具在主线程 Worker 里执行，可以正确传递 callbacks，但不能用 runToolInWorker
+ */
+function canRunInParallelDirect(calls: ToolCallInfo[]): boolean {
+  // 全部是 run_agent / spawn_agent 时，可以用 executeTool 并行（各自启动独立 SubAgent Worker）
+  return calls.every((c) => c.name === 'run_agent' || c.name === 'spawn_agent');
 }
 
 // ===== 并行工具执行（多 Worker 线程） =====
@@ -502,7 +589,16 @@ async function executeTool(
 
   try {
     const start = Date.now();
-    const result = await tool.execute(tc.input, abortSignal);
+    const result = await tool.execute(tc.input, abortSignal, {
+      onSubAgentMessage: (msg) => {
+        // SubAgent 消息只走 onSubAgentMessage，避免与主 Agent 消息流混淆
+        callbacks.onSubAgentMessage?.(msg);
+      },
+      onSubAgentUpdateMessage: (id, updates) => {
+        // SubAgent 更新只走 onSubAgentUpdateMessage，跳过主 Agent 的节流逻辑
+        callbacks.onSubAgentUpdateMessage?.(id, updates);
+      },
+    });
     // 对工具输出统一脱敏
     const safeResult = sanitizeOutput(result);
 

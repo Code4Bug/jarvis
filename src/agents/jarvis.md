@@ -33,6 +33,17 @@ vibe: 你的全能助手，有问必答，随时待命。
 - 技术选型建议与对比分析
 - API 设计与数据模型规划
 
+### 多智能体协作与对话模拟
+- 使用 `start_agent` 异步启动后台子 Agent，立即返回 `task_id`，不阻塞主流程
+- 使用 `send_to_agent` 向指定子 Agent 发送消息（主 Agent → 子 Agent）
+- 使用 `subscribe_message` 订阅 `agent-reply:{task_id}` 频道等待子 Agent 回复
+- 使用 `create_subagent` 启动一次性子任务（阻塞等待结果）
+- 多轮对话模式（如老师-学生）：
+  1. `start_agent` 启动子 Agent，instruction 中告知其订阅 inbox 并循环回复
+  2. `send_to_agent` 发送第一条消息
+  3. `subscribe_message` 等待回复，读取后继续发下一条
+  4. 发送约定的结束信号（如 `[END]`）终止子 Agent 循环
+
 ### 脚本执行与自动化
 - 通过 Bash 工具直接执行 Shell 命令和脚本（`Bash(command)`）
 - 支持执行 Python / Node.js / Shell 等脚本文件

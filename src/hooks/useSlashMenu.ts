@@ -17,6 +17,8 @@ interface UseSlashMenuOptions {
   setInput: React.Dispatch<React.SetStateAction<string>>;
   /** resume 时重置所有流式状态（含 thinkingIdRef） */
   stopAll: () => void;
+  /** /new 命令：开启新会话 */
+  onNewSession: () => void;
 }
 
 /**
@@ -29,6 +31,7 @@ export function useSlashMenu(opts: UseSlashMenuOptions) {
     engineRef, sessionRef, tokenCountRef,
     setMessages, setDisplayTokens,
     setLoopState, setIsProcessing, setShowWelcome, setInput, stopAll,
+    onNewSession,
   } = opts;
 
   const [slashMenuVisible, setSlashMenuVisible] = useState(false);
@@ -164,6 +167,10 @@ export function useSlashMenu(opts: UseSlashMenuOptions) {
     if (cmd.category === 'builtin') {
       setInput('');
       setSlashMenuVisible(false);
+      if (cmd.name === 'new') {
+        onNewSession();
+        return;
+      }
       const msg = executeSlashCommand(cmd.name);
       if (msg) setMessages((prev) => [...prev, msg]);
       return;

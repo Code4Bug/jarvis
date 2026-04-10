@@ -6,11 +6,27 @@ import { listDirectory } from './listDirectory.js';
 import { searchFiles } from './searchFiles.js';
 import { semanticSearch } from './semanticSearch.js';
 import { createSkill } from './createSkill.js';
+import { runAgent } from './runAgent.js';
+import { spawnAgent } from './spawnAgent.js';
+import { sendToAgent } from './sendToAgent.js';
+import { publishMessage } from './publishMessage.js';
+import { subscribeMessage } from './subscribeMessage.js';
+import { readChannel } from './readChannel.js';
 
-export { readFile, writeFile, runCommand, listDirectory, searchFiles, semanticSearch, createSkill };
+export {
+  readFile, writeFile, runCommand, listDirectory, searchFiles,
+  semanticSearch, createSkill,
+  runAgent, spawnAgent, sendToAgent,
+  publishMessage, subscribeMessage, readChannel,
+};
 
 /** 所有内置工具 */
-export const allTools: Tool[] = [readFile, writeFile, runCommand, listDirectory, searchFiles, semanticSearch, createSkill];
+export const allTools: Tool[] = [
+  readFile, writeFile, runCommand, listDirectory, searchFiles,
+  semanticSearch, createSkill,
+  runAgent, spawnAgent, sendToAgent,
+  publishMessage, subscribeMessage, readChannel,
+];
 
 /** 按名称查找内置工具 */
 export function findTool(name: string): Tool | undefined {

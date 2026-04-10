@@ -9,6 +9,8 @@ import { TranscriptMessage } from '../types/index.js';
 import { EngineCallbacks } from './QueryEngine.js';
 import { DangerConfirmResult } from './query.js';
 import { WorkerOutbound, WorkerInbound } from './queryWorker.js';
+import { agentMessageBus } from './AgentMessageBus.js';
+import { spawnSubAgentInMainThread } from '../tools/spawnAgent.js';
 
 // 兼容 ESM __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -85,6 +87,80 @@ export class WorkerBridge {
             worker.postMessage(reply);
             break;
           }
+          case 'subagent_message':
+            // SubAgent 消息：推送到 UI（已携带 subAgentId）
+            callbacks.onSubAgentMessage?.(msg.msg);
+            break;
+          case 'subagent_update_message':
+            callbacks.onSubAgentUpdateMessage?.(msg.id, msg.updates);
+            break;
+
+          // ===== MessageBus IPC 代理（queryWorker → 主线程） =====
+          case 'bus_publish': {
+            agentMessageBus.publish(msg.from, msg.channel, msg.payload);
+            const ack: WorkerInbound = { type: 'bus_publish_ack', requestId: msg.requestId };
+            worker.postMessage(ack);
+            break;
+          }
+          case 'bus_subscribe': {
+            agentMessageBus.subscribe(msg.channel, msg.timeoutMs, msg.fromOffset).then((busMsg) => {
+              const reply: WorkerInbound = {
+                type: 'bus_subscribe_result',
+                requestId: msg.requestId,
+                message: busMsg,
+              };
+              worker.postMessage(reply);
+            });
+            break;
+          }
+          case 'bus_read_history': {
+            const history = agentMessageBus.getHistory(msg.channel, msg.limit);
+            const reply: WorkerInbound = {
+              type: 'bus_read_history_result',
+              requestId: msg.requestId,
+              messages: history,
+            };
+            worker.postMessage(reply);
+            break;
+          }
+          case 'bus_get_offset': {
+            const offset = agentMessageBus.getOffset(msg.channel);
+            const reply: WorkerInbound = {
+              type: 'bus_get_offset_result',
+              requestId: msg.requestId,
+              offset,
+            };
+            worker.postMessage(reply);
+            break;
+          }
+          case 'bus_list_channels': {
+            const channels = agentMessageBus.listChannels();
+            const reply: WorkerInbound = {
+              type: 'bus_list_channels_result',
+              requestId: msg.requestId,
+              channels,
+            };
+            worker.postMessage(reply);
+            break;
+          }
+
+          // ===== spawn_subagent IPC（在主线程创建 SubAgentBridge）=====
+          case 'spawn_subagent': {
+            const result = spawnSubAgentInMainThread(
+              msg.taskId,
+              msg.instruction,
+              msg.agentLabel,
+              msg.allowedTools,
+            );
+            const reply: WorkerInbound = {
+              type: 'spawn_subagent_result',
+              requestId: msg.requestId,
+              result,
+            };
+            worker.postMessage(reply);
+            break;
+          }
+
           case 'done':
             this.worker = null;
             worker.terminate();

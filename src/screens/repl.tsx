@@ -21,6 +21,7 @@ import { QueryEngine, EngineCallbacks } from '../core/QueryEngine.js';
 import { DangerConfirmResult } from '../core/query.js';
 import { HIDE_WELCOME_AFTER_INPUT } from '../config/constants.js';
 import { generateAgentHint } from '../core/hint.js';
+import { subscribeAgentCount, getActiveAgentCount } from '../core/spawnRegistry.js';
 
 export default function REPL() {
   const { exit } = useApp();
@@ -36,6 +37,7 @@ export default function REPL() {
   const [showWelcome, setShowWelcome] = useState(true);
   const [showDetails, setShowDetails] = useState(false);
   const [placeholder, setPlaceholder] = useState('');
+  const [activeAgents, setActiveAgents] = useState(getActiveAgentCount());
   const lastEscRef = useRef<number>(0);
 
   const sessionRef = useRef<Session>({
@@ -54,16 +56,32 @@ export default function REPL() {
   const {
     displayTokens, tokenCountRef,
     startTokenTimer, stopTokenTimer,
-    updateTokenCount, resetTokens,
+    updateTokenCount, syncTokenDisplay, resetTokens,
   } = useTokenDisplay();
+
+  // ===== 新会话逻辑 =====
+  const handleNewSession = useCallback(() => {
+    if (engineRef.current) {
+      engineRef.current.reset();
+      sessionRef.current = engineRef.current.getSession();
+    }
+    setMessages([]);
+    clearStream();
+    setLoopState(null);
+    setIsProcessing(false);
+    setShowWelcome(true);
+    resetTokens();
+    generateAgentHint().then((hint) => setPlaceholder(hint)).catch(() => {});
+  }, [clearStream, resetTokens]);
 
   // 斜杠菜单
   const slashMenu = useSlashMenu({
     engineRef, sessionRef, tokenCountRef,
     setMessages,
-    setDisplayTokens: (n: number) => updateTokenCount(n),
+    setDisplayTokens: (n: number) => syncTokenDisplay(n),
     setLoopState, setIsProcessing, setShowWelcome, setInput,
     stopAll,
+    onNewSession: handleNewSession,
   });
 
   // 危险命令确认
@@ -77,9 +95,21 @@ export default function REPL() {
   useEffect(() => {
     engineRef.current = new QueryEngine();
     sessionRef.current = engineRef.current.getSession();
+    // 注册持久 UI 回调，供 spawn_agent 后台子 Agent 跨轮次推送消息
+    engineRef.current.registerUIBus(
+      (msg) => setMessages((prev) => [...prev, msg]),
+      (id, updates) => setMessages((prev) =>
+        prev.map((m) => (m.id === id ? { ...m, ...updates } : m)),
+      ),
+    );
     generateAgentHint().then((hint) => setPlaceholder(hint)).catch((err) => {
       console.error('[hint] 初始化提示失败:', err);
     });
+  }, []);
+
+  // 订阅后台 SubAgent 计数变化
+  useEffect(() => {
+    return subscribeAgentCount((count) => setActiveAgents(count));
   }, []);
 
   // ===== Engine Callbacks =====
@@ -131,6 +161,14 @@ export default function REPL() {
         setDangerConfirm({ command, reason, ruleName, resolve });
       });
     },
+    onSubAgentMessage: (msg) => {
+      setMessages((prev) => [...prev, msg]);
+    },
+    onSubAgentUpdateMessage: (id, updates) => {
+      setMessages((prev) =>
+        prev.map((msg) => (msg.id === id ? { ...msg, ...updates } : msg)),
+      );
+    },
   };
 
   // ===== 提交处理 =====
@@ -150,18 +188,7 @@ export default function REPL() {
           slashMenu.setSlashMenuVisible(false);
 
           if (cmdName === 'new') {
-            // 新会话：重置引擎 + 清空所有状态
-            if (engineRef.current) {
-              engineRef.current.reset();
-              sessionRef.current = engineRef.current.getSession();
-            }
-            setMessages([]);
-            clearStream();
-            setLoopState(null);
-            setIsProcessing(false);
-            setShowWelcome(true);
-            resetTokens();
-            generateAgentHint().then((hint) => setPlaceholder(hint)).catch(() => {});
+            handleNewSession();
           } else if (cmdName === 'session_clear') {
             if (engineRef.current) {
               const count = engineRef.current.clearOtherSessions();
@@ -254,7 +281,7 @@ export default function REPL() {
       clearStream();
       await engineRef.current.handleQuery(trimmed, callbacks);
     },
-    [isProcessing, pushHistory, clearStream, resetTokens, slashMenu],
+    [isProcessing, pushHistory, clearStream, resetTokens, slashMenu, handleNewSession],
   );
 
   // ===== 输入处理 =====
@@ -450,7 +477,7 @@ export default function REPL() {
           )}
         </Box>
         <Text color="gray">{'─'.repeat(Math.max(width - 2, 1))}</Text>
-        <StatusBar width={width - 2} totalTokens={displayTokens} />
+        <StatusBar width={width - 2} totalTokens={displayTokens} activeAgents={activeAgents} />
       </Box>
     </Box>
   );
