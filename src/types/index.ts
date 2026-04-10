@@ -34,6 +34,8 @@ export interface Message {
   think?: string;
   /** 中断提示文案，仅 aborted 状态时使用 */
   abortHint?: string;
+  /** 并行执行组 ID，同组工具同时运行 */
+  parallelGroupId?: string;
 }
 
 // ===== 内容块（流式） =====
@@ -87,11 +89,19 @@ export interface LLMServiceConfig {
   maxTokens?: number;
 }
 
+export interface ToolCallInfo {
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+}
+
 export interface StreamCallbacks {
   onText: (text: string) => void;
   /** 大模型思考过程（reasoning_content），仅本地展示 */
   onThinking?: (text: string) => void;
   onToolUse: (id: string, name: string, input: Record<string, unknown>) => void;
+  /** LLM 返回多个并行工具调用时触发（替代多次 onToolUse） */
+  onMultiToolUse?: (calls: ToolCallInfo[]) => void;
   onComplete: () => void;
   onError: (error: Error) => void;
 }

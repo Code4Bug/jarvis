@@ -62,9 +62,8 @@ export default function REPL() {
     engineRef, sessionRef, tokenCountRef,
     setMessages,
     setDisplayTokens: (n: number) => updateTokenCount(n),
-    setStreamText: clearStream,
-    streamBufferRef,
     setLoopState, setIsProcessing, setShowWelcome, setInput,
+    stopAll,
   });
 
   // 危险命令确认
@@ -89,6 +88,7 @@ export default function REPL() {
       setMessages((prev) => [...prev, msg]);
     },
     onUpdateMessage: (id, updates) => {
+      // thinking 消息流式内容更新（无 status 字段）
       if (updates.content !== undefined && !updates.status && thinkingIdRef.current === null) {
         handleThinkingUpdate(id, updates.content);
         return;
@@ -97,6 +97,7 @@ export default function REPL() {
         handleThinkingUpdate(id, updates.content);
         return;
       }
+      // thinking 消息完成（带 status）
       if (thinkingIdRef.current === id && updates.status) {
         finishThinking();
       }
@@ -313,8 +314,8 @@ export default function REPL() {
     const drain = (data: Buffer | string) => {
       if (!isProcessingRef.current) return;
       const raw = typeof data === 'string' ? data : data.toString('utf-8');
-      // 放行 Ctrl+C 和 ESC，其余全部吞掉
-      if (raw === '\x03' || raw === '\x1B') return;
+      // 放行 Ctrl+C、ESC 和 Ctrl+O，其余全部吞掉
+      if (raw === '\x03' || raw === '\x1B' || raw === '\x0F') return;
       // 清空 Buffer 内容（仅当确实是 Buffer 时），减少后续处理的干扰
       if (Buffer.isBuffer(data)) data.fill(0);
     };
@@ -336,6 +337,7 @@ export default function REPL() {
     if (isProcessing) {
       if (key.ctrl && ch === 'c') { handleCtrlC(); return; }
       if (key.escape && engineRef.current) { engineRef.current.abort(); return; }
+      if (key.ctrl && ch === 'o') { setShowDetails((prev) => !prev); return; }
       return; // 丢弃其他所有按键
     }
     if (key.tab && slashMenu.slashMenuVisible) { slashMenu.handleSlashMenuSelect(); return; }

@@ -103,10 +103,13 @@ function MessageItem({ msg, showDetails = false }: { msg: Message; showDetails?:
       ? Object.values(msg.toolArgs).map((v) => String(v)).filter(Boolean).join(', ')
       : '';
     const toolLabel = isBash && bashCmd ? `Bash(${bashCmd})` : (msg.toolName || 'tool');
+    // 并行组标识
+    const isParallel = !!msg.parallelGroupId;
 
     return (
       <Box flexDirection="column" marginBottom={1}>
         <Box>
+          {isParallel && <Text color="cyan" dimColor>⇉ </Text>}
           <Text color={dotColor}>{dot} </Text>
           {isBash && bashCmd ? (
             <Text><Text color="white" bold>Bash</Text><Text color="gray">({bashCmd})</Text></Text>

@@ -1,4 +1,7 @@
 import { v4 as uuid } from 'uuid';
+import { Worker } from 'worker_threads';
+import { fileURLToPath } from 'url';
+import path from 'path';
 import {
   Message,
   LoopState,
@@ -6,16 +9,15 @@ import {
   LLMService,
   TranscriptMessage,
   ContentBlock,
+  ToolCallInfo,
 } from '../types/index.js';
 import { findToolMerged as findTool } from '../tools/index';
 import { MAX_ITERATIONS } from '../config/constants';
-import { sanitizeOutput, validateCommand, authorizeCommand, authorizeRule, AuthMode } from './safeguard';
+import { sanitizeOutput, validateCommand, authorizeCommand, authorizeRule } from './safeguard';
 
-interface ToolCallInfo {
-  id: string;
-  name: string;
-  input: Record<string, unknown>;
-}
+// 兼容 ESM __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 /** 危险命令确认结果 */
 export type DangerConfirmResult = 'once' | 'always' | 'cancel';
@@ -64,75 +66,61 @@ export async function executeQuery(
 
     const result = await runOneIteration(localTranscript, _tools, service, callbacks, abortSignal);
 
-    // 添加推理消息
-    if (result.text) {
-      const blocks: ContentBlock[] = [{ type: 'text', text: result.text }];
-      if (result.toolCall) {
-        blocks.push({
-          type: 'tool_use',
-          id: result.toolCall.id,
-          name: result.toolCall.name,
-          input: result.toolCall.input,
-        });
-      }
-      localTranscript.push({ role: 'assistant', content: blocks });
-    } else if (result.toolCall) {
-      localTranscript.push({
-        role: 'assistant',
-        content: [{
-          type: 'tool_use',
-          id: result.toolCall.id,
-          name: result.toolCall.name,
-          input: result.toolCall.input,
-        }],
-      });
+    // 构建 assistant transcript 块
+    const assistantBlocks: ContentBlock[] = [];
+    if (result.text) assistantBlocks.push({ type: 'text', text: result.text });
+    for (const tc of result.toolCalls) {
+      assistantBlocks.push({ type: 'tool_use', id: tc.id, name: tc.name, input: tc.input });
+    }
+    if (assistantBlocks.length > 0) {
+      localTranscript.push({ role: 'assistant', content: assistantBlocks });
     }
 
     // 无工具调用 → 结束
-    if (!result.toolCall) break;
+    if (result.toolCalls.length === 0) break;
 
-    // 中断发生在推理阶段：assistant 已输出 tool_use 但尚未执行，
-    // 需要补一条 tool_result 保持 transcript 配对完整
+    // 中断发生在推理阶段
     if (abortSignal.aborted) {
-      const skippedResult = `[用户中断] 工具 ${result.toolCall.name} 未执行（用户按下 ESC 中断）`;
-      localTranscript.push({
-        role: 'tool_result',
-        toolUseId: result.toolCall.id,
-        content: skippedResult,
-      });
-      // 同步 UI 消息
-      const skipMsgId = uuid();
-      callbacks.onMessage({
-        id: skipMsgId,
-        type: 'tool_exec',
-        status: 'aborted',
-        content: `${result.toolCall.name} 已跳过（用户中断）`,
-        timestamp: Date.now(),
-        toolName: result.toolCall.name,
-        toolArgs: result.toolCall.input,
-        toolResult: skippedResult,
-        abortHint: '命令已跳过（ESC）',
-      });
+      for (const tc of result.toolCalls) {
+        const skippedResult = `[用户中断] 工具 ${tc.name} 未执行（用户按下 ESC 中断）`;
+        localTranscript.push({ role: 'tool_result', toolUseId: tc.id, content: skippedResult });
+        const skipMsgId = uuid();
+        callbacks.onMessage({
+          id: skipMsgId, type: 'tool_exec', status: 'aborted',
+          content: `${tc.name} 已跳过（用户中断）`, timestamp: Date.now(),
+          toolName: tc.name, toolArgs: tc.input, toolResult: skippedResult,
+          abortHint: '命令已跳过（ESC）',
+        });
+      }
       break;
     }
 
-    // 执行工具
-    const tc = result.toolCall;
-    const toolResult = await executeTool(tc, callbacks, abortSignal);
-    localTranscript.push({
-      role: 'tool_result',
-      toolUseId: tc.id,
-      content: toolResult.content,
-    });
+    // 判断是否可并行执行
+    let toolResults: Array<{ tc: ToolCallInfo; content: string; isError: boolean }>;
+    if (result.toolCalls.length > 1 && canRunInParallel(result.toolCalls)) {
+      toolResults = await executeToolsInParallel(result.toolCalls, callbacks, abortSignal);
+    } else {
+      toolResults = [];
+      for (const tc of result.toolCalls) {
+        const r = await executeTool(tc, callbacks, abortSignal);
+        toolResults.push({ tc, ...r });
+        if (r.isError) break;
+      }
+    }
 
-    if (toolResult.isError) break;
+    // 将所有工具结果写入 transcript
+    for (const { tc, content } of toolResults) {
+      localTranscript.push({ role: 'tool_result', toolUseId: tc.id, content });
+    }
+
+    // 任意工具出错则终止循环
+    if (toolResults.some((r) => r.isError)) break;
   }
 
   loopState.isRunning = false;
   loopState.aborted = abortSignal.aborted;
   callbacks.onLoopStateChange({ ...loopState });
 
-  // 如果被用户中断，在 transcript 中追加中断标记，让 LLM 知道上轮回复未完成
   if (abortSignal.aborted) {
     localTranscript.push({
       role: 'user',
@@ -150,11 +138,11 @@ async function runOneIteration(
   service: LLMService,
   callbacks: QueryCallbacks,
   abortSignal: { aborted: boolean },
-): Promise<{ text: string; toolCall: ToolCallInfo | null; duration: number; tokenCount: number; firstTokenLatency: number; tokensPerSecond: number }> {
+): Promise<{ text: string; toolCalls: ToolCallInfo[]; duration: number; tokenCount: number; firstTokenLatency: number; tokensPerSecond: number }> {
   const startTime = Date.now();
   let accumulatedText = '';
   let accumulatedThinking = '';
-  let toolCall: ToolCallInfo | null = null;
+  let toolCalls: ToolCallInfo[] = [];
   let tokenCount = 0;
   let firstTokenTime: number | null = null;
 
@@ -175,15 +163,13 @@ async function runOneIteration(
         onThinking: (text) => {
           if (abortSignal.aborted) { safeResolve(); return; }
           accumulatedThinking += text;
-          tokenCount++; // thinking token 也计入统计
-          // 实时更新 thinking 消息内容，让用户看到思考过程
+          tokenCount++;
           callbacks.onUpdateMessage(thinkingId, { content: accumulatedThinking });
         },
         onText: (text) => {
           if (abortSignal.aborted) { safeResolve(); return; }
           if (firstTokenTime === null) {
             firstTokenTime = Date.now();
-            // 收到首 token，将 thinking 消息标记为完成（保留 think 内容）
             callbacks.onUpdateMessage(thinkingId, {
               status: 'success',
               content: accumulatedThinking ? '思考完成' : '',
@@ -196,7 +182,12 @@ async function runOneIteration(
         },
         onToolUse: (id, name, input) => {
           if (abortSignal.aborted) { safeResolve(); return; }
-          toolCall = { id, name, input };
+          toolCalls = [{ id, name, input }];
+          safeResolve();
+        },
+        onMultiToolUse: (calls) => {
+          if (abortSignal.aborted) { safeResolve(); return; }
+          toolCalls = calls;
           safeResolve();
         },
         onComplete: () => safeResolve(),
@@ -210,7 +201,6 @@ async function runOneIteration(
   const durationSec = duration / 1000;
   const tokensPerSecond = durationSec > 0 ? tokenCount / durationSec : 0;
 
-  // 最终更新 thinking 消息状态
   callbacks.onUpdateMessage(thinkingId, {
     status: 'success',
     content: accumulatedThinking ? '思考完成' : '',
@@ -220,7 +210,6 @@ async function runOneIteration(
 
   if (accumulatedText) {
     const isAborted = abortSignal.aborted;
-    // 先清空流式文本，再 push reasoning 消息，避免 streamText 被后续工具消息挤到底部
     callbacks.onClearStreamText?.();
     callbacks.onMessage({
       id: uuid(),
@@ -234,9 +223,7 @@ async function runOneIteration(
       tokensPerSecond,
       ...(isAborted ? { abortHint: '推理已中断（ESC）' } : {}),
     });
-  } else if (accumulatedThinking && !toolCall) {
-    // 模型只输出了 thinking 内容但没有 content（常见于 Qwen3.5 thinking 模式）
-    // 将 thinking 内容作为回复展示，避免用户看到空白
+  } else if (accumulatedThinking && toolCalls.length === 0) {
     const isAborted = abortSignal.aborted;
     callbacks.onClearStreamText?.();
     callbacks.onStreamText(accumulatedThinking);
@@ -255,10 +242,190 @@ async function runOneIteration(
     });
   }
 
-  // 如果模型只输出了 thinking 但没有 content，将 thinking 作为 text 回填（保证 transcript 不丢失）
-  const effectiveText = accumulatedText || (accumulatedThinking && !toolCall ? accumulatedThinking : '');
+  const effectiveText = accumulatedText || (accumulatedThinking && toolCalls.length === 0 ? accumulatedThinking : '');
+  return { text: effectiveText, toolCalls, duration, tokenCount, firstTokenLatency, tokensPerSecond };
+}
 
-  return { text: effectiveText, toolCall, duration, tokenCount, firstTokenLatency, tokensPerSecond };
+// ===== 并行执行判断 =====
+
+/** 判断一组工具调用是否可以并行执行（无写-写冲突、无读-写冲突） */
+function canRunInParallel(calls: ToolCallInfo[]): boolean {
+  // 写操作工具集合
+  const WRITE_TOOLS = new Set(['WriteFile', 'Bash']);
+  // 读操作工具集合
+  const READ_TOOLS = new Set(['ReadFile', 'ListDirectory', 'SearchFiles', 'SemanticSearch']);
+
+  const hasWrite = calls.some((c) => WRITE_TOOLS.has(c.name));
+  const hasRead = calls.some((c) => READ_TOOLS.has(c.name));
+
+  // 有写操作时：写-写 或 读-写 混合均不可并行（避免竞态）
+  if (hasWrite) return false;
+
+  // 全部是读操作 → 可并行
+  if (hasRead && !hasWrite) return true;
+
+  // Bash 命令：检查是否有文件路径重叠（简单启发式）
+  const bashCalls = calls.filter((c) => c.name === 'Bash');
+  if (bashCalls.length > 1) {
+    // 多个 Bash 命令默认不并行（无法静态分析副作用）
+    return false;
+  }
+
+  // 其余情况（如多个只读 skill）允许并行
+  return true;
+}
+
+// ===== 并行工具执行（多 Worker 线程） =====
+
+/** 在独立 Worker 线程中执行单个工具，返回结果字符串 */
+function runToolInWorker(
+  tc: ToolCallInfo,
+  abortSignal: { aborted: boolean },
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const isTsx = __filename.endsWith('.ts');
+    const workerScript = isTsx
+      ? `
+import { tsImport } from 'tsx/esm/api';
+import { workerData, parentPort } from 'worker_threads';
+import { pathToFileURL } from 'url';
+const mod = await tsImport(workerData.__file, pathToFileURL(workerData.__file).href);
+const result = await mod.runToolDirect(workerData.tc, workerData.abortSignal);
+parentPort.postMessage({ result });
+`
+      : `
+import { runToolDirect } from '${__filename.replace(/\.ts$/, '.js')}';
+import { workerData, parentPort } from 'worker_threads';
+const result = await runToolDirect(workerData.tc, workerData.abortSignal);
+parentPort.postMessage({ result });
+`;
+
+    const worker = new Worker(workerScript, {
+      eval: true,
+      workerData: {
+        __file: __filename,
+        tc,
+        abortSignal: { aborted: abortSignal.aborted },
+      },
+    });
+
+    worker.on('message', (msg: { result: string }) => {
+      worker.terminate();
+      resolve(msg.result);
+    });
+    worker.on('error', (err) => {
+      worker.terminate();
+      reject(err);
+    });
+    worker.on('exit', (code) => {
+      if (code !== 0) reject(new Error(`工具 Worker 异常退出 code=${code}`));
+    });
+  });
+}
+
+/**
+ * 直接执行工具（供 Worker 线程调用）
+ * 注意：此函数在 Worker 线程中运行，不能使用 callbacks
+ */
+export async function runToolDirect(
+  tc: ToolCallInfo,
+  abortSignal: { aborted: boolean },
+): Promise<string> {
+  // 动态导入避免循环依赖
+  const { findToolMerged } = await import('../tools/index.js');
+  const tool = findToolMerged(tc.name);
+  if (!tool) return `错误: 未知工具 ${tc.name}`;
+  try {
+    const result = await tool.execute(tc.input, abortSignal);
+    const { sanitizeOutput } = await import('./safeguard.js');
+    return sanitizeOutput(result);
+  } catch (err: any) {
+    return `错误: ${err.message || '工具执行失败'}`;
+  }
+}
+
+/** 并行执行多个工具，每个工具在独立 Worker 线程中运行，实时更新 UI */
+async function executeToolsInParallel(
+  calls: ToolCallInfo[],
+  callbacks: QueryCallbacks,
+  abortSignal: { aborted: boolean },
+): Promise<Array<{ tc: ToolCallInfo; content: string; isError: boolean }>> {
+  const groupId = uuid();
+
+  // 为每个工具预先创建 pending 消息节点（TUI 立即渲染占位）
+  const msgIds = calls.map((tc) => {
+    const msgId = uuid();
+    const isSkill = tc.name.startsWith('skill_');
+    const displayContent = tc.name === 'Bash' && tc.input.command
+      ? `Bash(${tc.input.command})`
+      : isSkill
+        ? `${tc.name.replace(/^skill_/, '')}(${Object.values(tc.input).join(', ')})`
+        : `调用工具: ${tc.name}`;
+
+    callbacks.onMessage({
+      id: msgId,
+      type: 'tool_exec',
+      status: 'pending',
+      content: displayContent,
+      timestamp: Date.now(),
+      toolName: tc.name,
+      toolArgs: tc.input,
+      parallelGroupId: groupId,
+    });
+    return msgId;
+  });
+
+  // 并行启动所有工具（各自在独立 Worker 线程）
+  const tasks = calls.map(async (tc, i) => {
+    const msgId = msgIds[i];
+    const start = Date.now();
+
+    // 安全围栏检查（Bash 命令）
+    if (tc.name === 'Bash' && tc.input.command) {
+      const { validateCommand } = await import('./safeguard.js');
+      const check = validateCommand(tc.input.command as string);
+      if (!check.allowed) {
+        if (!check.canOverride) {
+          const errMsg = `${check.reason}\n🚫 该命令已被永久禁止。\n命令: ${tc.input.command}`;
+          callbacks.onUpdateMessage(msgId, { status: 'error', content: errMsg, toolResult: errMsg });
+          return { tc, content: `错误: ${errMsg}`, isError: true };
+        }
+        // 危险命令在并行模式下直接跳过（无法弹出交互式确认）
+        const skipMsg = `⚠️ 并行模式下跳过危险命令: ${tc.input.command}\n原因: ${check.reason}`;
+        callbacks.onUpdateMessage(msgId, { status: 'error', content: skipMsg, toolResult: skipMsg });
+        return { tc, content: skipMsg, isError: true };
+      }
+    }
+
+    try {
+      const content = await runToolInWorker(tc, abortSignal);
+      const wasAborted = abortSignal.aborted;
+      const isSkill = tc.name.startsWith('skill_');
+      const doneContent = wasAborted
+        ? `${tc.name} 已中断`
+        : tc.name === 'Bash' && tc.input.command
+          ? `Bash(${tc.input.command}) 执行完成`
+          : isSkill
+            ? `${tc.name.replace(/^skill_/, '')}(${Object.values(tc.input).join(', ')}) 执行完成`
+            : `工具 ${tc.name} 执行完成`;
+
+      callbacks.onUpdateMessage(msgId, {
+        status: wasAborted ? 'aborted' : 'success',
+        content: doneContent,
+        toolResult: content,
+        duration: Date.now() - start,
+        parallelGroupId: groupId,
+        ...(wasAborted ? { abortHint: '命令已中断（ESC）' } : {}),
+      });
+      return { tc, content, isError: false };
+    } catch (err: any) {
+      const errMsg = err.message || '工具执行失败';
+      callbacks.onUpdateMessage(msgId, { status: 'error', content: errMsg, toolResult: errMsg });
+      return { tc, content: `错误: ${errMsg}`, isError: false };
+    }
+  });
+
+  return Promise.all(tasks);
 }
 
 /** 执行工具并返回结果 */

@@ -11,12 +11,12 @@ interface UseSlashMenuOptions {
   tokenCountRef: React.MutableRefObject<number>;
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
   setDisplayTokens: (n: number) => void;
-  setStreamText: (s: string) => void;
-  streamBufferRef: React.MutableRefObject<string>;
   setLoopState: React.Dispatch<React.SetStateAction<import('../types/index').LoopState | null>>;
   setIsProcessing: React.Dispatch<React.SetStateAction<boolean>>;
   setShowWelcome: React.Dispatch<React.SetStateAction<boolean>>;
   setInput: React.Dispatch<React.SetStateAction<string>>;
+  /** resume 时重置所有流式状态（含 thinkingIdRef） */
+  stopAll: () => void;
 }
 
 /**
@@ -27,8 +27,8 @@ interface UseSlashMenuOptions {
 export function useSlashMenu(opts: UseSlashMenuOptions) {
   const {
     engineRef, sessionRef, tokenCountRef,
-    setMessages, setDisplayTokens, setStreamText, streamBufferRef,
-    setLoopState, setIsProcessing, setShowWelcome, setInput,
+    setMessages, setDisplayTokens,
+    setLoopState, setIsProcessing, setShowWelcome, setInput, stopAll,
   } = opts;
 
   const [slashMenuVisible, setSlashMenuVisible] = useState(false);
@@ -67,12 +67,12 @@ export function useSlashMenu(opts: UseSlashMenuOptions) {
     if (!engineRef.current) return;
     const result = engineRef.current.loadSession(sessionId);
     if (result) {
+      // 先重置所有流式状态（含 thinkingIdRef），避免旧 id 残留导致新会话 thinking 永不结束
+      stopAll();
       setMessages(result.messages);
       sessionRef.current = result.session;
       tokenCountRef.current = result.session.totalTokens;
       setDisplayTokens(result.session.totalTokens);
-      setStreamText('');
-      streamBufferRef.current = '';
       setLoopState(null);
       setIsProcessing(false);
       setShowWelcome(false);
@@ -94,7 +94,7 @@ export function useSlashMenu(opts: UseSlashMenuOptions) {
       };
       setMessages((prev) => [...prev, errMsg]);
     }
-  }, [engineRef, sessionRef, tokenCountRef, setMessages, setDisplayTokens, setStreamText, streamBufferRef, setLoopState, setIsProcessing, setShowWelcome]);
+  }, [engineRef, sessionRef, tokenCountRef, setMessages, setDisplayTokens, stopAll, setLoopState, setIsProcessing, setShowWelcome]);
 
   // 选中
   const handleSlashMenuSelect = useCallback(() => {

@@ -381,13 +381,36 @@ export class LLMServiceImpl implements LLMService {
         }
       }
 
-      // 流结束后，触发工具调用回调（只取第一个，与 agentic loop 单步设计一致）
+      // 流结束后，触发工具调用回调
       if (pendingToolCalls.size > 0) {
-        const first = pendingToolCalls.get(0);
-        if (first && first.name) {
-          let input: Record<string, unknown> = {};
-          try { input = JSON.parse(first.args); } catch { /* 参数解析失败则传空 */ }
-          callbacks.onToolUse(first.id, first.name, input);
+        // 按 index 排序，收集所有有效的 tool_call
+        const sortedCalls = Array.from(pendingToolCalls.entries())
+          .sort(([a], [b]) => a - b)
+          .map(([, tc]) => tc)
+          .filter((tc) => tc.name);
+
+        if (sortedCalls.length > 0) {
+          if (sortedCalls.length === 1) {
+            // 单工具：走原有路径
+            const tc = sortedCalls[0];
+            let input: Record<string, unknown> = {};
+            try { input = JSON.parse(tc.args); } catch { /* 参数解析失败则传空 */ }
+            callbacks.onToolUse(tc.id, tc.name, input);
+          } else if (callbacks.onMultiToolUse) {
+            // 多工具：触发并行回调
+            const calls = sortedCalls.map((tc) => {
+              let input: Record<string, unknown> = {};
+              try { input = JSON.parse(tc.args); } catch { /* ignore */ }
+              return { id: tc.id, name: tc.name, input };
+            });
+            callbacks.onMultiToolUse(calls);
+          } else {
+            // 降级：逐个触发 onToolUse（只触发第一个，保持原有行为）
+            const tc = sortedCalls[0];
+            let input: Record<string, unknown> = {};
+            try { input = JSON.parse(tc.args); } catch { /* ignore */ }
+            callbacks.onToolUse(tc.id, tc.name, input);
+          }
           return; // tool_use 时不触发 onComplete
         }
       }

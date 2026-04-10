@@ -9,10 +9,10 @@ import {
   TranscriptMessage,
   LoopState,
 } from '../types/index.js';
-import { getAllTools } from '../tools/index';
-import { executeQuery, QueryCallbacks, DangerConfirmResult } from './query';
+import { DangerConfirmResult } from './query';
+import { WorkerBridge } from './WorkerBridge';
 import { MockService } from '../services/api/mock';
-import { LLMServiceImpl, getDefaultConfig } from '../services/api/llm';
+import { LLMServiceImpl } from '../services/api/llm';
 import { loadConfig, getActiveModel } from '../config/loader';
 import { SESSIONS_DIR } from '../config/constants';
 import { setActiveAgent } from '../config/agentState';
@@ -34,7 +34,7 @@ export class QueryEngine {
   private service: LLMService;
   private session: Session;
   private transcript: TranscriptMessage[] = [];
-  private abortSignal = { aborted: false };
+  private workerBridge = new WorkerBridge();
 
   constructor() {
     // 尝试从配置文件加载 LLM，失败则回退 MockService
@@ -72,10 +72,8 @@ export class QueryEngine {
     }
   }
 
-  /** 处理用户输入 */
+  /** 处理用户输入（在独立 Worker 线程中执行） */
   async handleQuery(userInput: string, callbacks: EngineCallbacks): Promise<void> {
-    this.abortSignal = { aborted: false };
-
     const userMsg: Message = {
       id: uuid(),
       type: 'user',
@@ -86,31 +84,29 @@ export class QueryEngine {
     callbacks.onMessage(userMsg);
     this.session.messages.push(userMsg);
 
-    const queryCallbacks: QueryCallbacks = {
+    // 将回调包装后传给 WorkerBridge，Worker 事件会映射回这里
+    const bridgeCallbacks: EngineCallbacks = {
       onMessage: (msg) => {
         callbacks.onMessage(msg);
         this.session.messages.push(msg);
       },
       onUpdateMessage: callbacks.onUpdateMessage,
       onStreamText: (text) => {
-        // 每收到一个 chunk 视为一个 token，实时递增并通知 UI
         this.session.totalTokens++;
         callbacks.onStreamText(text);
         callbacks.onSessionUpdate(this.session);
       },
       onClearStreamText: callbacks.onClearStreamText,
       onLoopStateChange: callbacks.onLoopStateChange,
+      onSessionUpdate: callbacks.onSessionUpdate,
       onConfirmDangerousCommand: callbacks.onConfirmDangerousCommand,
     };
 
     try {
-      this.transcript = await executeQuery(
+      this.transcript = await this.workerBridge.run(
         userInput,
         this.transcript,
-        getAllTools(),
-        this.service,
-        queryCallbacks,
-        this.abortSignal,
+        bridgeCallbacks,
       );
     } catch (err: any) {
       const errMsg: Message = {
@@ -128,9 +124,9 @@ export class QueryEngine {
     this.saveSession();
   }
 
-  /** 终止当前任务 */
+  /** 终止当前任务（通知 Worker 中断） */
   abort() {
-    this.abortSignal.aborted = true;
+    this.workerBridge.abort();
   }
 
   /** 重置会话 */
@@ -218,6 +214,11 @@ export class QueryEngine {
 
       // 恢复会话状态
       this.session = loaded;
+      // 过滤掉 pending 状态的 thinking 消息（上次会话 abort 时可能残留）
+      const cleanedMessages = loaded.messages.filter(
+        (m) => !(m.type === 'thinking' && m.status === 'pending'),
+      );
+      this.session.messages = cleanedMessages;
       // 从历史消息重建 transcript
       this.transcript = [];
       for (const msg of loaded.messages) {
@@ -243,7 +244,7 @@ export class QueryEngine {
         }
       }
 
-      return { session: this.session, messages: loaded.messages };
+      return { session: this.session, messages: cleanedMessages };
     } catch {
       return null;
     }
