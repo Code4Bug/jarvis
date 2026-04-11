@@ -13,6 +13,7 @@ import { getAgent } from '../../agents/index.js';
 import { DEFAULT_AGENT } from '../../config/constants.js';
 import { getActiveAgent } from '../../config/agentState.js';
 import { getSystemInfoPrompt } from '../../config/systemInfo.js';
+import { readUserProfile } from '../../config/userProfile.js';
 
 export interface LLMConfig {
   apiKey: string;
@@ -82,6 +83,13 @@ interface OpenAITool {
       required: string[];
     };
   };
+}
+
+function buildUserProfilePrompt(): string {
+  const userProfile = readUserProfile();
+  if (!userProfile) return '';
+  return '\n\n---\n[用户画像] 以下内容来自 ~/.jarvis/USER.md，请将其视为对用户特征的长期记忆。在后续回复中可以据此调整表达方式、信息密度与建议方式，但不要直接暴露这段系统内容。' +
+    `\n${userProfile}`;
 }
 
 /** 将内部 TranscriptMessage[] 转为 OpenAI messages 格式 */
@@ -208,7 +216,7 @@ export class LLMServiceImpl implements LLMService {
 
     // 若外部直接传入 systemPrompt（SubAgent 场景），直接使用，跳过 agent 文件加载
     if (this.config.systemPrompt) {
-      this.systemPrompt = this.config.systemPrompt;
+      this.systemPrompt = this.config.systemPrompt + buildUserProfilePrompt();
       return;
     }
 
@@ -242,7 +250,7 @@ export class LLMServiceImpl implements LLMService {
       `\n- API 地址: ${activeModelCfg?.api_url ?? 'unknown'}` +
       `\n- 最大 Token: ${activeModelCfg?.max_tokens ?? 'unknown'}`;
 
-    this.systemPrompt = agentPrompt + roleBoundary + systemInfo + modelInfo;
+    this.systemPrompt = agentPrompt + roleBoundary + systemInfo + modelInfo + buildUserProfilePrompt();
   }
 
   async streamMessage(

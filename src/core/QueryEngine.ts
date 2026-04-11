@@ -19,6 +19,7 @@ import { setActiveAgent } from '../config/agentState.js';
 import { clearAuthorizations } from './safeguard.js';
 import { agentUIBus } from './AgentRegistry.js';
 import { logError, logInfo, logWarn } from './logger.js';
+import { updateUserProfileFromInput } from '../services/userProfile.js';
 
 export interface EngineCallbacks {
   onMessage: (msg: Message) => void;
@@ -43,19 +44,7 @@ export class QueryEngine {
   private workerBridge = new WorkerBridge();
 
   constructor() {
-    // 尝试从配置文件加载 LLM，失败则回退 MockService
-    const config = loadConfig();
-    const activeModel = getActiveModel(config);
-
-    if (activeModel) {
-      try {
-        this.service = new LLMServiceImpl();
-      } catch {
-        this.service = new MockService();
-      }
-    } else {
-      this.service = new MockService();
-    }
+    this.service = this.createService();
 
     this.session = this.createSession();
     this.ensureSessionDir();
@@ -91,6 +80,21 @@ export class QueryEngine {
     }
   }
 
+  private createService(): LLMService {
+    const config = loadConfig();
+    const activeModel = getActiveModel(config);
+
+    if (activeModel) {
+      try {
+        return new LLMServiceImpl();
+      } catch {
+        return new MockService();
+      }
+    }
+
+    return new MockService();
+  }
+
   /** 处理用户输入（在独立 Worker 线程中执行） */
   async handleQuery(userInput: string, callbacks: EngineCallbacks): Promise<void> {
     logInfo('query.received', {
@@ -107,6 +111,13 @@ export class QueryEngine {
     };
     callbacks.onMessage(userMsg);
     this.session.messages.push(userMsg);
+
+    if (this.transcript.length === 0) {
+      const updated = await updateUserProfileFromInput(userInput);
+      if (updated) {
+        this.service = this.createService();
+      }
+    }
 
     // 将回调包装后传给 WorkerBridge，Worker 事件会映射回这里
     const bridgeCallbacks: EngineCallbacks = {
@@ -185,17 +196,7 @@ export class QueryEngine {
     });
     setActiveAgent(agentName);
     // 重建 LLM service 以加载新 agent 的 system prompt
-    const config = loadConfig();
-    const activeModel = getActiveModel(config);
-    if (activeModel) {
-      try {
-        this.service = new LLMServiceImpl();
-      } catch {
-        this.service = new MockService();
-      }
-    } else {
-      this.service = new MockService();
-    }
+    this.service = this.createService();
     // 重置会话上下文
     this.saveSession();
     this.session = this.createSession();
