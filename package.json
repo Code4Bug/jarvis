@@ -1,6 +1,6 @@
 {
   "name": "@code4bug/jarvis-agent",
-  "version": "1.1.6",
+  "version": "1.1.7",
   "description": "基于 React + TypeScript + Ink 构建的命令行智能体交互界面",
   "type": "module",
   "main": "dist/index.js",
@@ -34,7 +34,7 @@
   },
   "license": "MIT",
   "author": "Code4Bug",
-  "homepage": "https://github.com/Code4Bug/jarvis#readme",
+    "homepage": "https://github.com/Code4Bug/jarvis#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Code4Bug/jarvis.git"
