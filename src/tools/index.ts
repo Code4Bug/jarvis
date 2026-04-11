@@ -12,12 +12,14 @@ import { sendToAgent } from './sendToAgent.js';
 import { publishMessage } from './publishMessage.js';
 import { subscribeMessage } from './subscribeMessage.js';
 import { readChannel } from './readChannel.js';
+import { manageMemory } from './manageMemory.js';
 
 export {
   readFile, writeFile, runCommand, listDirectory, searchFiles,
   semanticSearch, createSkill,
   runAgent, spawnAgent, sendToAgent,
   publishMessage, subscribeMessage, readChannel,
+  manageMemory,
 };
 
 /** 所有内置工具 */
@@ -26,6 +28,7 @@ export const allTools: Tool[] = [
   semanticSearch, createSkill,
   runAgent, spawnAgent, sendToAgent,
   publishMessage, subscribeMessage, readChannel,
+  manageMemory,
 ];
 
 /** 按名称查找内置工具 */

@@ -1,7 +1,6 @@
 import { v4 as uuid } from 'uuid';
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 import {
   Message,
   Session,
@@ -20,6 +19,7 @@ import { clearAuthorizations } from './safeguard.js';
 import { agentUIBus } from './AgentRegistry.js';
 import { logError, logInfo, logWarn } from './logger.js';
 import { updateUserProfileFromInput } from '../services/userProfile.js';
+import { updatePersistentMemoryFromConversation } from '../services/persistentMemory.js';
 
 export interface EngineCallbacks {
   onMessage: (msg: Message) => void;
@@ -42,6 +42,7 @@ export class QueryEngine {
   private session: Session;
   private transcript: TranscriptMessage[] = [];
   private workerBridge = new WorkerBridge();
+  private memoryUpdateQueue: Promise<void> = Promise.resolve();
 
   constructor() {
     this.service = this.createService();
@@ -97,6 +98,7 @@ export class QueryEngine {
 
   /** 处理用户输入（在独立 Worker 线程中执行） */
   async handleQuery(userInput: string, callbacks: EngineCallbacks): Promise<void> {
+    const previousTranscriptLength = this.transcript.length;
     logInfo('query.received', {
       sessionId: this.session.id,
       inputLength: userInput.length,
@@ -149,6 +151,8 @@ export class QueryEngine {
         this.transcript,
         bridgeCallbacks,
       );
+      const recentTranscript = this.transcript.slice(previousTranscriptLength);
+      this.schedulePersistentMemoryUpdate(userInput, recentTranscript);
       logInfo('query.completed', {
         sessionId: this.session.id,
         transcriptLength: this.transcript.length,
@@ -183,6 +187,7 @@ export class QueryEngine {
     this.saveSession();
     this.session = this.createSession();
     this.transcript = [];
+    this.memoryUpdateQueue = Promise.resolve();
     clearAuthorizations();
   }
 
@@ -201,6 +206,7 @@ export class QueryEngine {
     this.saveSession();
     this.session = this.createSession();
     this.transcript = [];
+    this.memoryUpdateQueue = Promise.resolve();
     logInfo('agent.switch.completed', {
       sessionId: this.session.id,
       agentName,
@@ -228,6 +234,21 @@ export class QueryEngine {
     } catch (error) {
       logError('session.save_failed', error, { sessionId: this.session.id });
     }
+  }
+
+  private schedulePersistentMemoryUpdate(userInput: string, recentTranscript: TranscriptMessage[]) {
+    if (!userInput.trim() || recentTranscript.length === 0) return;
+
+    const sessionId = this.session.id;
+    this.memoryUpdateQueue = this.memoryUpdateQueue
+      .catch(() => {})
+      .then(async () => {
+        await updatePersistentMemoryFromConversation({
+          sessionId,
+          userInput,
+          recentTranscript,
+        });
+      });
   }
 
   /** 列出所有历史会话（按更新时间倒序），返回摘要信息 */
