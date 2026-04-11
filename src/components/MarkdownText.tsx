@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Text } from 'ink';
+import { Box, Text } from 'ink';
 import { Marked } from 'marked';
 // @ts-ignore — marked-terminal 无内置类型声明
 import { markedTerminal } from 'marked-terminal';
@@ -193,14 +193,25 @@ function renderMarkdown(text: string): string {
  * Markdown 终端渲染组件
  * 支持表格（动态列宽+自动换行）、代码块（深色背景+边框）、加粗、列表等
  * 对流式不完整文本做容错补全
+ *
+ * 渲染策略：将 ANSI 字符串按 \n 拆行，每行用独立 <Text> 渲染。
+ * 直接将含 \n 的 ANSI 字符串塞入单个 <Text> 会导致 ink 布局引擎
+ * 与 ANSI 转义序列冲突，出现光标错位和输出错乱。
  */
 function MarkdownText({ text, color }: { text: string; color?: string }) {
-  const rendered = useMemo(() => renderMarkdown(text), [text]);
+  const lines = useMemo(() => {
+    const rendered = renderMarkdown(text);
+    return rendered.split('\n');
+  }, [text]);
 
   return (
-    <Text wrap="wrap" color={color}>
-      {rendered}
-    </Text>
+    <Box flexDirection="column">
+      {lines.map((line, i) => (
+        <Text key={i} wrap="wrap" color={color}>
+          {line}
+        </Text>
+      ))}
+    </Box>
   );
 }
 
