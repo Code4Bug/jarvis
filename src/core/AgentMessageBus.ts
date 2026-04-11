@@ -11,6 +11,7 @@
  *   主线程（queryWorker）中，SubAgent Worker 通过 IPC 消息与其交互。
  *   SubAgentBridge 负责在主线程侧代理 publish/subscribe 请求。
  */
+import { logInfo } from './logger.js';
 
 export interface BusMessage {
   /** 发布者 Agent 标识 */
@@ -39,6 +40,11 @@ class AgentMessageBus {
    */
   publish(from: string, channel: string, payload: string): void {
     const msg: BusMessage = { from, channel, payload, timestamp: Date.now() };
+    logInfo('bus.publish', {
+      from,
+      channel,
+      payloadLength: payload.length,
+    });
 
     // 存入历史
     if (!this.history.has(channel)) this.history.set(channel, []);
@@ -65,10 +71,19 @@ class AgentMessageBus {
    * @param fromOffset 从第几条开始消费（0-based），不传则只等新消息
    */
   subscribe(channel: string, timeoutMs = 30_000, fromOffset?: number): Promise<BusMessage | null> {
+    logInfo('bus.subscribe', {
+      channel,
+      timeoutMs,
+      fromOffset,
+    });
     // 如果指定了 offset 且历史中已有该位置之后的消息，立即返回
     if (fromOffset !== undefined) {
       const history = this.history.get(channel) ?? [];
       if (fromOffset < history.length) {
+        logInfo('bus.subscribe.hit_history', {
+          channel,
+          fromOffset,
+        });
         return Promise.resolve(history[fromOffset]);
       }
     }
@@ -80,11 +95,17 @@ class AgentMessageBus {
         if (list) {
           this.waiters.set(channel, list.filter((w) => w.resolve !== (resolve as any)));
         }
+        logInfo('bus.subscribe.timeout', { channel, timeoutMs, fromOffset });
         resolve(null);
       }, timeoutMs);
 
       const wrappedResolve: SubscribeCallback = (msg) => {
         clearTimeout(timer);
+        logInfo('bus.subscribe.received', {
+          channel,
+          fromOffset,
+          from: msg.from,
+        });
         resolve(msg);
       };
 

@@ -12,8 +12,10 @@ import { TranscriptMessage, Message, LoopState, Session } from '../types/index.j
 import { BusMessage } from './AgentMessageBus.js';
 import { pendingBusRequests } from './workerBusProxy.js';
 import { pendingSpawnRequests } from './spawnRegistry.js';
+import { logError, logInfo, logWarn } from './logger.js';
 
 if (!parentPort) throw new Error('queryWorker must run inside worker_threads');
+logInfo('query_worker.ready');
 
 // ===== 消息类型定义 =====
 
@@ -71,6 +73,7 @@ const pendingConfirms = new Map<string, (choice: DangerConfirmResult) => void>()
 parentPort.on('message', async (msg: WorkerInbound) => {
   if (msg.type === 'abort') {
     abortSignal.aborted = true;
+    logWarn('query_worker.abort_received');
     return;
   }
 
@@ -115,6 +118,10 @@ parentPort.on('message', async (msg: WorkerInbound) => {
 
   if (msg.type === 'run') {
     abortSignal.aborted = false;
+    logInfo('query_worker.run.start', {
+      inputLength: msg.userInput.length,
+      transcriptLength: msg.transcript.length,
+    });
 
     const send = (out: WorkerOutbound) => parentPort!.postMessage(out);
 
@@ -144,8 +151,12 @@ parentPort.on('message', async (msg: WorkerInbound) => {
         callbacks,
         abortSignal,
       );
+      logInfo('query_worker.run.done', {
+        transcriptLength: newTranscript.length,
+      });
       send({ type: 'done', transcript: newTranscript });
     } catch (err: any) {
+      logError('query_worker.run.failed', err);
       send({ type: 'error', message: err.message ?? '未知错误' });
     }
   }

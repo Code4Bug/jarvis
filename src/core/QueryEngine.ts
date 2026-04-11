@@ -18,6 +18,7 @@ import { SESSIONS_DIR } from '../config/constants.js';
 import { setActiveAgent } from '../config/agentState.js';
 import { clearAuthorizations } from './safeguard.js';
 import { agentUIBus } from './AgentRegistry.js';
+import { logError, logInfo, logWarn } from './logger.js';
 
 export interface EngineCallbacks {
   onMessage: (msg: Message) => void;
@@ -58,6 +59,10 @@ export class QueryEngine {
 
     this.session = this.createSession();
     this.ensureSessionDir();
+    logInfo('engine.created', {
+      sessionId: this.session.id,
+      service: this.service.constructor.name,
+    });
   }
 
   /** 注册持久 UI 回调，供后台 spawn_agent 子 Agent 推送消息 */
@@ -66,6 +71,7 @@ export class QueryEngine {
     onUpdateMessage: (id: string, updates: Partial<Message>) => void,
   ): void {
     agentUIBus.register(onMessage, onUpdateMessage);
+    logInfo('engine.ui_bus_registered', { sessionId: this.session.id });
   }
 
   private createSession(): Session {
@@ -87,6 +93,11 @@ export class QueryEngine {
 
   /** 处理用户输入（在独立 Worker 线程中执行） */
   async handleQuery(userInput: string, callbacks: EngineCallbacks): Promise<void> {
+    logInfo('query.received', {
+      sessionId: this.session.id,
+      inputLength: userInput.length,
+      preview: userInput.slice(0, 200),
+    });
     const userMsg: Message = {
       id: uuid(),
       type: 'user',
@@ -127,7 +138,13 @@ export class QueryEngine {
         this.transcript,
         bridgeCallbacks,
       );
+      logInfo('query.completed', {
+        sessionId: this.session.id,
+        transcriptLength: this.transcript.length,
+        totalTokens: this.session.totalTokens,
+      });
     } catch (err: any) {
+      logError('query.failed', err, { sessionId: this.session.id });
       const errMsg: Message = {
         id: uuid(),
         type: 'error',
@@ -145,11 +162,13 @@ export class QueryEngine {
 
   /** 终止当前任务（通知 Worker 中断） */
   abort() {
+    logWarn('query.abort_requested', { sessionId: this.session.id });
     this.workerBridge.abort();
   }
 
   /** 重置会话 */
   reset() {
+    logInfo('session.reset', { sessionId: this.session.id });
     this.saveSession();
     this.session = this.createSession();
     this.transcript = [];
@@ -160,6 +179,10 @@ export class QueryEngine {
    * 切换智能体：持久化选择 + 重建 LLM service + 重置会话
    */
   switchAgent(agentName: string) {
+    logInfo('agent.switch.start', {
+      fromSessionId: this.session.id,
+      agentName,
+    });
     setActiveAgent(agentName);
     // 重建 LLM service 以加载新 agent 的 system prompt
     const config = loadConfig();
@@ -177,6 +200,11 @@ export class QueryEngine {
     this.saveSession();
     this.session = this.createSession();
     this.transcript = [];
+    logInfo('agent.switch.completed', {
+      sessionId: this.session.id,
+      agentName,
+      service: this.service.constructor.name,
+    });
   }
 
   /** 保存会话到文件 */
@@ -191,7 +219,14 @@ export class QueryEngine {
       }
       const filePath = path.join(SESSIONS_DIR, `${this.session.id}.json`);
       fs.writeFileSync(filePath, JSON.stringify(this.session, null, 2), 'utf-8');
-    } catch { /* 静默失败 */ }
+      logInfo('session.saved', {
+        sessionId: this.session.id,
+        filePath,
+        messageCount: this.session.messages.length,
+      });
+    } catch (error) {
+      logError('session.save_failed', error, { sessionId: this.session.id });
+    }
   }
 
   /** 列出所有历史会话（按更新时间倒序），返回摘要信息 */
@@ -263,8 +298,14 @@ export class QueryEngine {
         }
       }
 
+      logInfo('session.loaded', {
+        sessionId,
+        messageCount: cleanedMessages.length,
+        transcriptLength: this.transcript.length,
+      });
       return { session: this.session, messages: cleanedMessages };
-    } catch {
+    } catch (error) {
+      logError('session.load_failed', error, { sessionId });
       return null;
     }
   }
@@ -290,8 +331,13 @@ export class QueryEngine {
           count++;
         } catch { /* 跳过删除失败的文件 */ }
       }
+      logInfo('session.clear_others', {
+        sessionId: this.session.id,
+        removedCount: count,
+      });
       return count;
-    } catch {
+    } catch (error) {
+      logError('session.clear_others_failed', error, { sessionId: this.session.id });
       return 0;
     }
   }

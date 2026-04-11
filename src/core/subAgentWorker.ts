@@ -17,8 +17,10 @@ import { loadConfig, getActiveModel } from '../config/loader.js';
 import { TranscriptMessage, Message, LoopState, SubAgentTask } from '../types/index.js';
 import { BusMessage } from './AgentMessageBus.js';
 import { pendingBusRequests } from './workerBusProxy.js';
+import { logError, logInfo, logWarn } from './logger.js';
 
 if (!parentPort) throw new Error('subAgentWorker must run inside worker_threads');
+logInfo('subagent_worker.ready');
 
 // ===== 消息类型定义 =====
 
@@ -78,6 +80,7 @@ const pendingConfirms = new Map<string, (choice: DangerConfirmResult) => void>()
 parentPort.on('message', async (msg: SubAgentInbound) => {
   if (msg.type === 'abort') {
     abortSignal.aborted = true;
+    logWarn('subagent_worker.abort_received');
     return;
   }
 
@@ -114,6 +117,12 @@ parentPort.on('message', async (msg: SubAgentInbound) => {
     abortSignal.aborted = false;
     const { task } = msg;
     const { taskId, instruction, allowedTools, contextTranscript, role, systemPrompt } = task;
+    logInfo('subagent_worker.run.start', {
+      taskId,
+      inputLength: instruction.length,
+      allowedTools,
+      transcriptLength: contextTranscript?.length ?? 0,
+    });
 
     const send = (out: SubAgentOutbound) => parentPort!.postMessage(out);
 
@@ -147,8 +156,13 @@ parentPort.on('message', async (msg: SubAgentInbound) => {
         callbacks,
         abortSignal,
       );
+      logInfo('subagent_worker.run.done', {
+        taskId,
+        transcriptLength: newTranscript.length,
+      });
       send({ type: 'done', taskId, transcript: newTranscript });
     } catch (err: any) {
+      logError('subagent_worker.run.failed', err, { taskId });
       send({ type: 'error', taskId, message: err.message ?? '未知错误' });
     }
   }

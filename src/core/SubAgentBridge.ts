@@ -15,6 +15,7 @@ import { TranscriptMessage, Message, LoopState, SubAgentTask, SubAgentResult } f
 import { DangerConfirmResult } from './query.js';
 import { SubAgentInbound, SubAgentOutbound } from './subAgentWorker.js';
 import { agentMessageBus } from './AgentMessageBus.js';
+import { logError, logInfo, logWarn } from './logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -63,6 +64,10 @@ export class SubAgentBridge {
     return new Promise((resolve, reject) => {
       const worker = createSubAgentWorker();
       this.worker = worker;
+      logInfo('subagent_bridge.run.start', {
+        taskId: task.taskId,
+        allowedTools: task.allowedTools,
+      });
 
       // 收集 SubAgent 产生的所有消息，用于汇总结果
       const collectedMessages: Message[] = [];
@@ -159,6 +164,11 @@ export class SubAgentBridge {
             finalTranscript = msg.transcript;
             this.worker = null;
             worker.terminate();
+            logInfo('subagent_bridge.run.done', {
+              taskId: msg.taskId,
+              transcriptLength: msg.transcript.length,
+              messageCount: collectedMessages.length,
+            });
             // 从 transcript 中提取最终输出文本
             resolve({
               taskId: msg.taskId,
@@ -172,6 +182,10 @@ export class SubAgentBridge {
           case 'error':
             this.worker = null;
             worker.terminate();
+            logError('subagent_bridge.run.failed', msg.message, {
+              taskId: msg.taskId,
+              messageCount: collectedMessages.length,
+            });
             resolve({
               taskId: msg.taskId,
               status: 'error',
@@ -186,6 +200,7 @@ export class SubAgentBridge {
 
       worker.on('error', (err) => {
         this.worker = null;
+        logError('subagent_bridge.worker_error', err, { taskId: task.taskId });
         reject(err);
       });
 
@@ -193,6 +208,7 @@ export class SubAgentBridge {
         if (this.worker) {
           // Worker 退出但未发送 done/error，说明异常终止
           this.worker = null;
+          logError('subagent_bridge.worker_exit_abnormal', undefined, { taskId: task.taskId, code });
           reject(new Error(`SubAgent Worker 意外退出，code=${code}`));
         }
       });
@@ -205,6 +221,7 @@ export class SubAgentBridge {
   /** 中断 SubAgent 执行 */
   abort() {
     if (this.worker) {
+      logWarn('subagent_bridge.abort_forwarded');
       const msg: SubAgentInbound = { type: 'abort' };
       this.worker.postMessage(msg);
     }

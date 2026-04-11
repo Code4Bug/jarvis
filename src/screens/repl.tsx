@@ -22,6 +22,7 @@ import { DangerConfirmResult } from '../core/query.js';
 import { HIDE_WELCOME_AFTER_INPUT } from '../config/constants.js';
 import { generateAgentHint } from '../core/hint.js';
 import { subscribeAgentCount, getActiveAgentCount } from '../core/spawnRegistry.js';
+import { logError, logInfo, logWarn } from '../core/logger.js';
 
 export default function REPL() {
   const { exit } = useApp();
@@ -61,6 +62,7 @@ export default function REPL() {
 
   // ===== 新会话逻辑 =====
   const handleNewSession = useCallback(() => {
+    logInfo('ui.new_session');
     if (engineRef.current) {
       engineRef.current.reset();
       sessionRef.current = engineRef.current.getSession();
@@ -103,8 +105,13 @@ export default function REPL() {
       ),
     );
     generateAgentHint().then((hint) => setPlaceholder(hint)).catch((err) => {
+      logError('ui.hint.init_failed', err);
       console.error('[hint] 初始化提示失败:', err);
     });
+    logInfo('ui.repl.mounted');
+    return () => {
+      logInfo('ui.repl.unmounted');
+    };
   }, []);
 
   // 订阅后台 SubAgent 计数变化
@@ -176,6 +183,10 @@ export default function REPL() {
     async (value: string) => {
       const trimmed = value.trim();
       if (!trimmed || isProcessing || !engineRef.current) return;
+      logInfo('ui.submit', {
+        inputLength: trimmed.length,
+        isSlashCommand: trimmed.startsWith('/'),
+      });
 
       if (trimmed.startsWith('/')) {
         const parts = trimmed.slice(1).split(/\s+/);
@@ -382,12 +393,15 @@ export default function REPL() {
       setShowWelcome(true);
       resetTokens();
       generateAgentHint().then((hint) => setPlaceholder(hint)).catch((err) => {
+        logError('ui.hint.reset_failed', err);
         console.error('[hint] 重新生成提示失败:', err);
       });
+      logInfo('ui.clear_screen_reset');
       return;
     }
     if (key.escape) {
       if (isProcessing && engineRef.current) {
+        logWarn('ui.abort_by_escape');
         engineRef.current.abort();
       } else if (input.length > 0) {
         const now = Date.now();

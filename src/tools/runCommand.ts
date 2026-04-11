@@ -1,6 +1,7 @@
 import { exec, ChildProcess } from 'child_process';
 import { Tool, AbortSignal } from '../types/index.js';
 import { sanitizeOutput } from '../core/safeguard.js';
+import { logError, logInfo, logWarn } from '../core/logger.js';
 
 /**
  * 异步执行命令，支持通过 abortSignal 中断子进程
@@ -11,6 +12,7 @@ function execAsync(
   abortSignal?: AbortSignal,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
+    logInfo('bash.exec.start', { command });
     const child: ChildProcess = exec(command, options, (error, stdout, stderr) => {
       // 清理轮询
       if (pollTimer !== null) clearInterval(pollTimer);
@@ -18,6 +20,10 @@ function execAsync(
       // 被中断时直接返回已有输出，不视为错误
       if (abortSignal?.aborted) {
         const partial = sanitizeOutput(String(stdout ?? '').trim());
+        logWarn('bash.exec.aborted', {
+          command,
+          stdoutLength: String(stdout ?? '').length,
+        });
         resolve(partial ? `(命令被中断)\n${partial}` : '(命令被中断)');
         return;
       }
@@ -28,9 +34,18 @@ function execAsync(
         if (stdout) parts.push(`[stdout] ${sanitizeOutput(String(stdout).trim())}`);
         if (error.code != null) parts.push(`[exit code] ${error.code}`);
         if (parts.length === 0) parts.push(error.message);
+        logError('bash.exec.failed', error, {
+          command,
+          stdoutLength: String(stdout ?? '').length,
+          stderrLength: String(stderr ?? '').length,
+        });
         reject(new Error(`命令执行失败:\n${parts.join('\n')}`));
         return;
       }
+      logInfo('bash.exec.done', {
+        command,
+        stdoutLength: String(stdout ?? '').length,
+      });
       resolve(sanitizeOutput(String(stdout).trim()) || '(命令执行完成，无输出)');
     });
 
@@ -41,6 +56,7 @@ function execAsync(
         if (abortSignal.aborted && child.pid) {
           if (pollTimer !== null) clearInterval(pollTimer);
           pollTimer = null;
+          logWarn('bash.exec.kill_requested', { command, pid: child.pid });
           // 先尝试 SIGTERM，给进程优雅退出的机会
           try { child.kill('SIGTERM'); } catch { /* ignore */ }
           // 500ms 后强制 SIGKILL

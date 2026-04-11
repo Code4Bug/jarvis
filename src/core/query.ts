@@ -14,6 +14,7 @@ import {
 import { findToolMerged as findTool } from '../tools/index.js';
 import { MAX_ITERATIONS, CONTEXT_TOKEN_LIMIT } from '../config/constants.js';
 import { sanitizeOutput, validateCommand, authorizeCommand, authorizeRule } from './safeguard.js';
+import { logError, logInfo, logWarn } from './logger.js';
 
 // 兼容 ESM __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -119,6 +120,10 @@ export async function executeQuery(
   callbacks: QueryCallbacks,
   abortSignal: { aborted: boolean },
 ): Promise<TranscriptMessage[]> {
+  logInfo('agent_loop.start', {
+    inputLength: userInput.length,
+    initialTranscriptLength: transcript.length,
+  });
   const localTranscript = [...transcript];
   localTranscript.push({ role: 'user', content: userInput });
 
@@ -132,9 +137,20 @@ export async function executeQuery(
 
   while (loopState.iteration < MAX_ITERATIONS && !abortSignal.aborted) {
     loopState.iteration++;
+    logInfo('agent_loop.iteration.start', {
+      iteration: loopState.iteration,
+      transcriptLength: localTranscript.length,
+    });
     callbacks.onLoopStateChange({ ...loopState });
 
     const result = await runOneIteration(compressTranscript(localTranscript), _tools, service, callbacks, abortSignal);
+    logInfo('agent_loop.iteration.result', {
+      iteration: loopState.iteration,
+      textLength: result.text.length,
+      toolCallCount: result.toolCalls.length,
+      duration: result.duration,
+      tokenCount: result.tokenCount,
+    });
 
     // 构建 assistant transcript 块
     const assistantBlocks: ContentBlock[] = [];
@@ -151,6 +167,10 @@ export async function executeQuery(
 
     // 中断发生在推理阶段
     if (abortSignal.aborted) {
+      logWarn('agent_loop.aborted_before_tool_execution', {
+        iteration: loopState.iteration,
+        toolCallCount: result.toolCalls.length,
+      });
       for (const tc of result.toolCalls) {
         const skippedResult = `[用户中断] 工具 ${tc.name} 未执行（用户按下 ESC 中断）`;
         localTranscript.push({ role: 'tool_result', toolUseId: tc.id, content: skippedResult });
@@ -197,12 +217,21 @@ export async function executeQuery(
   callbacks.onLoopStateChange({ ...loopState });
 
   if (abortSignal.aborted) {
+    logWarn('agent_loop.aborted', {
+      finalIteration: loopState.iteration,
+      transcriptLength: localTranscript.length,
+    });
     localTranscript.push({
       role: 'user',
       content: '[系统提示] 用户中断了上一轮回复（按下 ESC）。上一条助手消息可能不完整，请在后续回复中注意这一点。',
     });
   }
 
+  logInfo('agent_loop.done', {
+    finalIteration: loopState.iteration,
+    aborted: abortSignal.aborted,
+    transcriptLength: localTranscript.length,
+  });
   return localTranscript;
 }
 
@@ -222,6 +251,10 @@ async function runOneIteration(
   let firstTokenTime: number | null = null;
 
   const thinkingId = uuid();
+  logInfo('llm.iteration.requested', {
+    transcriptLength: transcript.length,
+    toolCount: tools.length,
+  });
   callbacks.onMessage({
     id: thinkingId,
     type: 'thinking',
@@ -318,6 +351,15 @@ async function runOneIteration(
   }
 
   const effectiveText = accumulatedText || (accumulatedThinking && toolCalls.length === 0 ? accumulatedThinking : '');
+  logInfo('llm.iteration.completed', {
+    duration,
+    tokenCount,
+    firstTokenLatency,
+    tokensPerSecond,
+    textLength: effectiveText.length,
+    thinkingLength: accumulatedThinking.length,
+    toolCallCount: toolCalls.length,
+  });
   return { text: effectiveText, toolCalls, duration, tokenCount, firstTokenLatency, tokensPerSecond };
 }
 
@@ -423,10 +465,16 @@ export async function runToolDirect(
   const tool = findToolMerged(tc.name);
   if (!tool) return `错误: 未知工具 ${tc.name}`;
   try {
+    logInfo('tool.direct.start', { toolName: tc.name, toolArgs: tc.input });
     const result = await tool.execute(tc.input, abortSignal);
     const { sanitizeOutput } = await import('./safeguard.js');
+    logInfo('tool.direct.done', {
+      toolName: tc.name,
+      resultLength: String(result).length,
+    });
     return sanitizeOutput(result);
   } catch (err: any) {
+    logError('tool.direct.failed', err, { toolName: tc.name, toolArgs: tc.input });
     return `错误: ${err.message || '工具执行失败'}`;
   }
 }
@@ -438,6 +486,10 @@ async function executeToolsInParallel(
   abortSignal: { aborted: boolean },
 ): Promise<Array<{ tc: ToolCallInfo; content: string; isError: boolean }>> {
   const groupId = uuid();
+  logInfo('tool.parallel_group.start', {
+    groupId,
+    toolNames: calls.map((call) => call.name),
+  });
 
   // 为每个工具预先创建 pending 消息节点（TUI 立即渲染占位）
   const msgIds = calls.map((tc) => {
@@ -507,12 +559,19 @@ async function executeToolsInParallel(
       return { tc, content, isError: false };
     } catch (err: any) {
       const errMsg = err.message || '工具执行失败';
+      logError('tool.parallel.failed', err, { groupId, toolName: tc.name, toolArgs: tc.input });
       callbacks.onUpdateMessage(msgId, { status: 'error', content: errMsg, toolResult: errMsg });
       return { tc, content: `错误: ${errMsg}`, isError: false };
     }
   });
 
-  return Promise.all(tasks);
+  const results = await Promise.all(tasks);
+  logInfo('tool.parallel_group.done', {
+    groupId,
+    toolNames: calls.map((call) => call.name),
+    errorCount: results.filter((item) => item.isError).length,
+  });
+  return results;
 }
 
 /** 执行工具并返回结果 */
@@ -543,6 +602,11 @@ async function executeTool(
     toolName: tc.name,
     toolArgs: tc.input,
   });
+  logInfo('tool.execute.start', {
+    toolName: tc.name,
+    toolArgs: tc.input,
+    toolExecId,
+  });
 
   // ===== 安全围栏：Bash 命令拦截 + 交互式确认 =====
   if (tc.name === 'Bash' && tc.input.command) {
@@ -552,6 +616,7 @@ async function executeTool(
       if (!check.canOverride) {
         // critical 级别：直接禁止
         const errMsg = `${check.reason}\n🚫 该命令已被永久禁止，无法通过授权绕过。\n命令: ${command}`;
+        logWarn('tool.execute.blocked', { toolName: tc.name, command, reason: check.reason });
         callbacks.onUpdateMessage(toolExecId, { status: 'error', content: errMsg, toolResult: errMsg });
         return { content: `错误: ${errMsg}`, isError: true };
       }
@@ -562,6 +627,7 @@ async function executeTool(
         const userChoice = await callbacks.onConfirmDangerousCommand(command, reason, ruleName);
         if (userChoice === 'cancel') {
           const cancelMsg = `⛔ 用户取消执行危险命令: ${command}`;
+          logWarn('tool.execute.cancelled_by_user', { toolName: tc.name, command, reason });
           callbacks.onUpdateMessage(toolExecId, { status: 'error', content: cancelMsg, toolResult: cancelMsg });
           return { content: cancelMsg, isError: true };
         }
@@ -583,6 +649,7 @@ async function executeTool(
   const tool = findTool(tc.name);
   if (!tool) {
     const errMsg = `未知工具: ${tc.name}`;
+    logWarn('tool.execute.unknown', { toolName: tc.name });
     callbacks.onUpdateMessage(toolExecId, { status: 'error', content: errMsg });
     return { content: errMsg, isError: true };
   }
@@ -623,9 +690,21 @@ async function executeTool(
       duration: Date.now() - start,
       ...(wasAborted ? { abortHint: '命令已中断（ESC）' } : {}),
     });
+    logInfo('tool.execute.done', {
+      toolName: tc.name,
+      toolExecId,
+      duration: Date.now() - start,
+      aborted: Boolean(wasAborted),
+      resultLength: safeResult.length,
+    });
     return { content: safeResult, isError: false };
   } catch (err: any) {
     const errMsg = err.message || '工具执行失败';
+    logError('tool.execute.failed', err, {
+      toolName: tc.name,
+      toolArgs: tc.input,
+      toolExecId,
+    });
     callbacks.onUpdateMessage(toolExecId, {
       status: 'error',
       content: errMsg,

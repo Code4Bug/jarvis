@@ -16,6 +16,7 @@ import { agentUIBus } from '../core/AgentRegistry.js';
 import { agentMessageBus } from '../core/AgentMessageBus.js';
 import { getBus } from '../core/busAccess.js';
 import { pendingSpawnRequests, incrementActiveAgents, decrementActiveAgents } from '../core/spawnRegistry.js';
+import { logError, logInfo } from '../core/logger.js';
 
 /** 运行中的 task_id 集合（主线程侧，防止重复启动） */
 const runningAgents = new Set<string>();
@@ -40,6 +41,7 @@ export function spawnSubAgentInMainThread(
   allowedTools?: string[],
 ): string {
   if (runningAgents.has(taskId)) {
+    logInfo('spawn_agent.duplicate', { taskId, agentLabel });
     return `子 Agent [${taskId}] 已在运行中，请使用 send_to_agent 向其发送消息，或使用不同的 task_id 启动新实例。`;
   }
 
@@ -47,6 +49,11 @@ export function spawnSubAgentInMainThread(
   const bridge = new SubAgentBridge();
   runningAgents.add(taskId);
   incrementActiveAgents();
+  logInfo('spawn_agent.started', {
+    taskId,
+    agentLabel,
+    allowedTools,
+  });
 
   bridge.run(
     { taskId, instruction, allowedTools },
@@ -65,10 +72,20 @@ export function spawnSubAgentInMainThread(
   ).then((result) => {
     runningAgents.delete(taskId);
     decrementActiveAgents();
+    logInfo('spawn_agent.done', {
+      taskId,
+      agentLabel,
+      status: result.status,
+      outputLength: result.output.length,
+    });
     agentMessageBus.publish(taskId, replyChannel, `[AGENT_DONE] ${result.output || '子 Agent 已完成'}`);
   }).catch((err) => {
     runningAgents.delete(taskId);
     decrementActiveAgents();
+    logError('spawn_agent.failed', err, {
+      taskId,
+      agentLabel,
+    });
     agentMessageBus.publish(taskId, replyChannel, `[AGENT_ERROR] ${err.message}`);
   });
 

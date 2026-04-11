@@ -11,6 +11,7 @@ import { DangerConfirmResult } from './query.js';
 import { WorkerOutbound, WorkerInbound } from './queryWorker.js';
 import { agentMessageBus } from './AgentMessageBus.js';
 import { spawnSubAgentInMainThread } from '../tools/spawnAgent.js';
+import { logError, logInfo, logWarn } from './logger.js';
 
 // 兼容 ESM __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -53,6 +54,10 @@ export class WorkerBridge {
       const workerTsPath = path.join(__dirname, 'queryWorker.ts');
       const worker = createWorker(workerTsPath);
       this.worker = worker;
+      logInfo('worker_bridge.run.start', {
+        inputLength: userInput.length,
+        transcriptLength: transcript.length,
+      });
 
       worker.on('message', async (msg: WorkerOutbound) => {
         switch (msg.type) {
@@ -164,11 +169,15 @@ export class WorkerBridge {
           case 'done':
             this.worker = null;
             worker.terminate();
+            logInfo('worker_bridge.run.done', {
+              transcriptLength: msg.transcript.length,
+            });
             resolve(msg.transcript);
             break;
           case 'error':
             this.worker = null;
             worker.terminate();
+            logError('worker_bridge.run.error', msg.message);
             reject(new Error(msg.message));
             break;
         }
@@ -176,12 +185,14 @@ export class WorkerBridge {
 
       worker.on('error', (err) => {
         this.worker = null;
+        logError('worker_bridge.worker_error', err);
         reject(err);
       });
 
       worker.on('exit', (code) => {
         if (code !== 0 && this.worker) {
           this.worker = null;
+          logError('worker_bridge.worker_exit_abnormal', undefined, { code });
           reject(new Error(`Worker 异常退出，code=${code}`));
         }
       });
@@ -195,6 +206,7 @@ export class WorkerBridge {
   /** 向 Worker 发送中断信号 */
   abort() {
     if (this.worker) {
+      logWarn('worker_bridge.abort_forwarded');
       const msg: WorkerInbound = { type: 'abort' };
       this.worker.postMessage(msg);
     }

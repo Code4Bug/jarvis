@@ -23,7 +23,9 @@ export const MAX_ITERATIONS = 50;
 
 /** 会话存储目录（~/.jarvis/sessions/） */
 import os from 'os';
-export const SESSIONS_DIR = path.join(os.homedir(), '.jarvis', 'sessions');
+export const JARVIS_HOME_DIR = path.join(os.homedir(), '.jarvis');
+export const SESSIONS_DIR = path.join(JARVIS_HOME_DIR, 'sessions');
+export const LOGS_DIR = path.join(JARVIS_HOME_DIR, 'logs');
 
 /** 输入后是否隐藏 WelcomeHeader，默认 false（不隐藏） */
 export const HIDE_WELCOME_AFTER_INPUT = false;
