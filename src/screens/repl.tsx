@@ -217,7 +217,7 @@ export default function REPL() {
               setMessages((prev) => [...prev, resultMsg]);
             }
           } else {
-            const msg = executeSlashCommand(cmdName);
+            const msg = await executeSlashCommand(cmdName);
             if (msg) setMessages((prev) => [...prev, msg]);
           }
           return;

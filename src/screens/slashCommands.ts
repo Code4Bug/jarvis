@@ -14,10 +14,10 @@ import {
  *
  * 纯函数，返回要追加的系统消息。不涉及 React 状态。
  */
-export function executeSlashCommand(cmdName: string): Message | null {
+export async function executeSlashCommand(cmdName: string): Promise<Message | null> {
   switch (cmdName) {
     case 'init': {
-      const result = executeInit();
+      const result = await executeInit();
       return {
         id: `init-${Date.now()}`,
         type: 'system',
