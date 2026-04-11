@@ -30,7 +30,11 @@ export default function REPL() {
   const { exit } = useApp();
   const width = useTerminalWidth();
   const windowFocused = useWindowFocus();
-  const { countdown, handleCtrlC } = useDoubleCtrlCExit(exit);
+  const handleExit = useCallback(() => {
+    exit();
+    setTimeout(() => process.exit(0), 50);
+  }, [exit]);
+  const { countdown, handleCtrlC } = useDoubleCtrlCExit(handleExit);
   const { pushHistory, navigateUp, navigateDown, resetNavigation } = useInputHistory();
 
   const [messages, setMessages] = useState<Message[]>([]);
