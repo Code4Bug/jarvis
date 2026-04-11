@@ -1,19 +1,15 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { Box, Text, useInput, useApp } from 'ink';
-import Spinner from 'ink-spinner';
-import MultilineInput from '../components/MultilineInput.js';
+import { Box, useInput, useApp } from 'ink';
 import WelcomeHeader from '../components/WelcomeHeader.js';
-import MessageItem from '../components/MessageItem.js';
-import StreamingText from '../components/StreamingText.js';
-import StatusBar from '../components/StatusBar.js';
-import SlashCommandMenu from '../components/SlashCommandMenu.js';
-import DangerConfirm, { ConfirmChoice } from '../components/DangerConfirm.js';
+import MessageViewport from '../components/MessageViewport.js';
+import ComposerPane from '../components/ComposerPane.js';
+import FooterPane from '../components/FooterPane.js';
+import { ConfirmChoice } from '../components/DangerConfirm.js';
 import { useWindowFocus } from '../hooks/useFocus.js';
 import { useInputHistory } from '../hooks/useInputHistory.js';
 import { useDoubleCtrlCExit } from '../hooks/useDoubleCtrlCExit.js';
 import { useTerminalWidth } from '../hooks/useTerminalWidth.js';
 import { useStreamThrottle } from '../hooks/useStreamThrottle.js';
-import { useTokenDisplay } from '../hooks/useTokenDisplay.js';
 import { useSlashMenu } from '../hooks/useSlashMenu.js';
 import { executeSlashCommand } from './slashCommands.js';
 import { Message, LoopState, Session } from '../types/index.js';
@@ -25,6 +21,7 @@ import { subscribeAgentCount, getActiveAgentCount } from '../core/spawnRegistry.
 import { logError, logInfo, logWarn } from '../core/logger.js';
 import { getAgentSubCommands } from '../commands/index.js';
 import { setActiveAgent } from '../config/agentState.js';
+import { hideTerminalCursor, showTerminalCursor } from '../terminal/cursor.js';
 
 export default function REPL() {
   const { exit } = useApp();
@@ -46,11 +43,13 @@ export default function REPL() {
   const [placeholder, setPlaceholder] = useState('');
   const [activeAgents, setActiveAgents] = useState(getActiveAgentCount());
   const lastEscRef = useRef<number>(0);
+  const lastAbortNoticeRef = useRef(0);
 
   const sessionRef = useRef<Session>({
     id: '', messages: [], createdAt: 0, updatedAt: 0, totalTokens: 0, totalCost: 0,
   });
   const engineRef = useRef<QueryEngine | null>(null);
+  const tokenCountRef = useRef(0);
 
   // 节流 hooks
   const {
@@ -60,11 +59,27 @@ export default function REPL() {
     handleThinkingUpdate, finishThinking, thinkingIdRef, stopAll,
   } = useStreamThrottle(setMessages);
 
-  const {
-    displayTokens, tokenCountRef,
-    startTokenTimer, stopTokenTimer,
-    updateTokenCount, syncTokenDisplay, resetTokens,
-  } = useTokenDisplay();
+  const syncTokenDisplay = useCallback((count: number) => {
+    tokenCountRef.current = count;
+  }, []);
+
+  const resetTokens = useCallback(() => {
+    tokenCountRef.current = 0;
+  }, []);
+
+  const appendAbortNotice = useCallback(() => {
+    const now = Date.now();
+    if (now - lastAbortNoticeRef.current < 800) return;
+    lastAbortNoticeRef.current = now;
+    setMessages((prev) => [...prev, {
+      id: `abort-notice-${now}`,
+      type: 'system',
+      status: 'aborted',
+      content: '已中断当前推理',
+      timestamp: now,
+      abortHint: '推理已中断（ESC）',
+    }]);
+  }, []);
 
   // ===== 新会话逻辑 =====
   const handleNewSession = useCallback(() => {
@@ -158,16 +173,14 @@ export default function REPL() {
       setLoopState(state);
       setIsProcessing(state.isRunning);
       if (state.isRunning) {
-        startTokenTimer();
         startStreamTimer();
       } else {
-        stopTokenTimer();
         stopAll();
       }
     },
     onSessionUpdate: (s) => {
       sessionRef.current = s;
-      updateTokenCount(s.totalTokens);
+      tokenCountRef.current = s.totalTokens;
     },
     onConfirmDangerousCommand: (command, reason, ruleName) => {
       return new Promise<DangerConfirmResult>((resolve) => {
@@ -366,19 +379,11 @@ export default function REPL() {
 
   // ===== 隐藏系统默认终端光标，使用 ink 渲染的反色光标代替 =====
   useEffect(() => {
-    process.stdout.write('\x1B[?25l');
+    hideTerminalCursor();
     return () => {
-      process.stdout.write('\x1B[?25h');
+      showTerminalCursor();
     };
   }, []);
-
-  // ===== processing/streaming 期间，每次 re-render 后将物理光标移到行首 =====
-  // ink 每次渲染后光标停在 StatusBar 行末，macOS IME 会在该位置显示 composing 候选框，
-  // 导致候选框与进度条重叠。将光标移到列 1（行首）让候选框出现在屏幕左侧空白区域。
-  useEffect(() => {
-    if (!isProcessing) return;
-    process.stdout.write('\x1B[1G');
-  });
 
   // ===== processing 期间隐藏终端光标，阻止 IME composing 显示 =====
   const isProcessingRef = useRef(isProcessing);
@@ -388,7 +393,7 @@ export default function REPL() {
     if (!isProcessing) return;
 
     // 隐藏终端光标 — 终端 IME 的 inline composing 仅在光标可见时渲染
-    process.stdout.write('\x1B[?25l');
+    hideTerminalCursor();
 
     // 高优先级 stdin 拦截：吞掉 processing 期间的所有输入（Ctrl+C / ESC 除外）
     // 防止字符积累在缓冲区，processing 结束后污染输入框
@@ -417,7 +422,11 @@ export default function REPL() {
     // processing 状态下，仅允许 Ctrl+C（退出）和 ESC（中断）
     if (isProcessing) {
       if (key.ctrl && ch === 'c') { handleCtrlC(); return; }
-      if (key.escape && engineRef.current) { engineRef.current.abort(); return; }
+      if (key.escape && engineRef.current) {
+        appendAbortNotice();
+        engineRef.current.abort();
+        return;
+      }
       if (key.ctrl && ch === 'o') { setShowDetails((prev) => !prev); return; }
       return; // 丢弃其他所有按键
     }
@@ -444,6 +453,7 @@ export default function REPL() {
     if (key.escape) {
       if (isProcessing && engineRef.current) {
         logWarn('ui.abort_by_escape');
+        appendAbortNotice();
         engineRef.current.abort();
       } else if (input.length > 0) {
         const now = Date.now();
@@ -463,78 +473,43 @@ export default function REPL() {
     <Box flexDirection="column" width={width}>
       {showWelcome && <WelcomeHeader width={width} />}
 
-      <Box flexDirection="column" paddingX={1} marginTop={showWelcome ? 0 : 1}>
-        {messages.map((msg) => (
-          <MessageItem key={msg.id} msg={msg} showDetails={showDetails} />
-        ))}
-        {streamText && <StreamingText text={streamText} />}
-        {dangerConfirm && (
-          <DangerConfirm
-            command={dangerConfirm.command}
-            reason={dangerConfirm.reason}
-            ruleName={dangerConfirm.ruleName}
-            onSelect={(choice: ConfirmChoice) => {
-              dangerConfirm.resolve(choice as DangerConfirmResult);
-              setDangerConfirm(null);
-            }}
-          />
-        )}
-        {loopState?.isRunning && (
-          <Box>
-            <Text color="yellow"><Spinner type="dots" /></Text>
-            <Text color="gray"> iteration {loopState.iteration}/{loopState.maxIterations}</Text>
-          </Box>
-        )}
+      <Box marginTop={showWelcome ? 0 : 1}>
+        <MessageViewport
+          messages={messages}
+          streamText={streamText}
+          showDetails={showDetails}
+          dangerConfirm={dangerConfirm}
+          loopState={loopState}
+          onResolveDangerConfirm={(choice: ConfirmChoice) => {
+            if (!dangerConfirm) return;
+            dangerConfirm.resolve(choice as DangerConfirmResult);
+            setDangerConfirm(null);
+          }}
+        />
       </Box>
 
-      <Box flexDirection="column" paddingX={1}>
-        <Text color="gray">{'─'.repeat(Math.max(width - 2, 1))}</Text>
-        {slashMenu.slashMenuVisible && !isProcessing && (
-          <SlashCommandMenu
-            commands={slashMenu.slashMenuItems}
-            selectedIndex={slashMenu.slashMenuIndex}
-          />
-        )}
-        <Box>
-          {countdown !== null ? (
-            <Box>
-              <Text color="gray" dimColor>❯ </Text>
-              <Text color="yellow">Press </Text>
-              <Text color="yellow" bold>Ctrl+C</Text>
-              <Text color="yellow"> again to exit </Text>
-              <Text color="gray" dimColor>({countdown}s)</Text>
-            </Box>
-          ) : isProcessing ? (
-            <Box>
-              <Text color="cyan" bold>❯ </Text>
-              <Text color="yellow"><Spinner type="dots" /></Text>
-              <Text color="gray" italic> processing...</Text>
-            </Box>
-          ) : (
-            <Box>
-              <Text color="cyan" bold>❯ </Text>
-              <MultilineInput
-                value={input}
-                onChange={handleInputChange}
-                onSubmit={handleEditorSubmit}
-                onUpArrow={handleUpArrow}
-                onDownArrow={handleDownArrow}
-                placeholder={placeholder}
-                isActive={!isProcessing}
-                showCursor={windowFocused && !isProcessing}
-                slashMenuActive={slashMenu.slashMenuVisible}
-                onSlashMenuUp={slashMenu.handleSlashMenuUp}
-                onSlashMenuDown={slashMenu.handleSlashMenuDown}
-                onSlashMenuSelect={handleSlashMenuAutocomplete}
-                onSlashMenuClose={slashMenu.handleSlashMenuClose}
-                onTabFillPlaceholder={handleTabFillPlaceholder}
-              />
-            </Box>
-          )}
-        </Box>
-        <Text color="gray">{'─'.repeat(Math.max(width - 2, 1))}</Text>
-        <StatusBar width={width - 2} totalTokens={displayTokens} activeAgents={activeAgents} />
-      </Box>
+      <ComposerPane
+        width={width}
+        countdown={countdown}
+        isProcessing={isProcessing}
+        input={input}
+        placeholder={placeholder}
+        windowFocused={windowFocused}
+        slashMenuVisible={slashMenu.slashMenuVisible}
+        slashMenuItems={slashMenu.slashMenuItems}
+        slashMenuIndex={slashMenu.slashMenuIndex}
+        onInputChange={handleInputChange}
+        onSubmit={handleEditorSubmit}
+        onUpArrow={handleUpArrow}
+        onDownArrow={handleDownArrow}
+        onSlashMenuUp={slashMenu.handleSlashMenuUp}
+        onSlashMenuDown={slashMenu.handleSlashMenuDown}
+        onSlashMenuSelect={handleSlashMenuAutocomplete}
+        onSlashMenuClose={slashMenu.handleSlashMenuClose}
+        onTabFillPlaceholder={handleTabFillPlaceholder}
+      />
+
+      <FooterPane width={width} tokenCountRef={tokenCountRef} activeAgents={activeAgents} />
     </Box>
   );
 }

@@ -1,8 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Box, Text, useInput, useStdin } from 'ink';
-
-/** 粘贴占位符的正则，匹配 [Pasted text #N +X lines] */
-const PASTE_PLACEHOLDER_RE = /\[Pasted text #(\d+) \+(\d+) lines\]/g;
+import { useInput, useStdin } from 'ink';
+import { disableBracketedPaste, enableBracketedPaste } from '../terminal/cursor.js';
+import { useMultilineInputStream } from '../hooks/useMultilineInputStream.js';
+import { useTerminalCursorSync } from '../hooks/useTerminalCursorSync.js';
+import InputTextView from './InputTextView.js';
+import {
+  expandPlaceholders as expandPastedPlaceholders,
+  findPlaceholderBeforeCursor,
+  getCursorRowCol,
+  insertTextAtCursor,
+  removeTextRange,
+  rowColToOffset,
+} from './inputEditing.js';
 
 /** 粘贴检测的时间窗口（ms），在此窗口内连续到达的数据视为一次粘贴 */
 const PASTE_DETECT_WINDOW_MS = 8;
@@ -89,23 +98,12 @@ export default function MultilineInput({
   const pasteCountRef = useRef(0);
   const pastedChunksRef = useRef<Map<number, PastedChunk>>(new Map());
 
-  // bracketed paste 缓冲
-  const pasteBufferRef = useRef<string | null>(null);
-
-  // 时间窗口粘贴检测：收集短时间内连续到达的数据块
-  const batchBufferRef = useRef('');
-  const batchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   // IME composing 缓冲：积累拼音字母，等 composing 结束后再一次性更新
   // imeBufferRef: 当前正在 composing 的拼音字母
   // imeTimerRef: composing 超时定时器，超时后将拼音作为普通文本提交
   // imeInsertedLen: 已经临时插入到 value 中的 composing 文本长度（用于替换）
   const imeBufferRef = useRef('');
-  const imeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const imeInsertedLenRef = useRef(0);
-
-  // 终端光标重定位定时器（用于 IME composing 位置修正）
-  const cursorRelocTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 启用 bracketed paste mode，并在激活时清空 stdin 缓冲区
   useEffect(() => {
@@ -114,9 +112,9 @@ export default function MultilineInput({
     if (typeof (stdin as any).read === 'function') {
       while ((stdin as any).read() !== null) { /* drain */ }
     }
-    process.stdout.write('\x1B[?2004h');
+    enableBracketedPaste();
     return () => {
-      process.stdout.write('\x1B[?2004l');
+      disableBracketedPaste();
     };
   }, [stdin, isActive]);
 
@@ -166,26 +164,6 @@ export default function MultilineInput({
   const onTabFillPlaceholderRef = useRef(onTabFillPlaceholder);
   onTabFillPlaceholderRef.current = onTabFillPlaceholder;
 
-  // 辅助：根据光标偏移计算所在行号和行内列号
-  const getCursorRowCol = (text: string, pos: number) => {
-    const before = text.slice(0, pos);
-    const row = (before.match(/\n/g) || []).length;
-    const lastNewline = before.lastIndexOf('\n');
-    const col = lastNewline === -1 ? pos : pos - lastNewline - 1;
-    return { row, col };
-  };
-
-  // 辅助：根据行号和列号计算偏移
-  const rowColToOffset = (text: string, row: number, col: number) => {
-    const lines = text.split('\n');
-    let offset = 0;
-    for (let i = 0; i < row && i < lines.length; i++) {
-      offset += lines[i].length + 1;
-    }
-    const targetLine = lines[Math.min(row, lines.length - 1)] ?? '';
-    return offset + Math.min(col, targetLine.length);
-  };
-
   /** 将粘贴的多行内容折叠为占位符，插入到当前光标位置 */
   const insertPaste = (pastedText: string) => {
     const v = valueRef.current;
@@ -195,9 +173,9 @@ export default function MultilineInput({
 
     // 单行粘贴直接插入，不折叠
     if (lineCount <= 1) {
-      const newVal = v.slice(0, c) + cleaned + v.slice(c);
-      emitChange(newVal);
-      setCursor(c + cleaned.length);
+      const result = insertTextAtCursor(v, c, cleaned);
+      emitChange(result.value);
+      setCursor(result.cursor);
       return;
     }
 
@@ -205,30 +183,14 @@ export default function MultilineInput({
     const id = ++pasteCountRef.current;
     pastedChunksRef.current.set(id, { id, content: cleaned, lineCount });
     const tag = `[Pasted text #${id} +${lineCount} lines]`;
-    const newVal = v.slice(0, c) + tag + v.slice(c);
-    emitChange(newVal);
-    setCursor(c + tag.length);
+    const result = insertTextAtCursor(v, c, tag);
+    emitChange(result.value);
+    setCursor(result.cursor);
   };
 
   /** 展开 value 中所有占位符为真实内容 */
   const expandPlaceholders = (text: string): string => {
-    return text.replace(PASTE_PLACEHOLDER_RE, (match, idStr) => {
-      const id = parseInt(idStr, 10);
-      const chunk = pastedChunksRef.current.get(id);
-      return chunk ? chunk.content : match;
-    });
-  };
-
-  /** 检测光标前是否紧邻一个占位符 */
-  const findPlaceholderBeforeCursor = (text: string, pos: number): { start: number; end: number } | null => {
-    if (pos === 0 || text[pos - 1] !== ']') return null;
-    const before = text.slice(0, pos);
-    const idx = before.lastIndexOf('[Pasted text #');
-    if (idx === -1) return null;
-    const sub = before.slice(idx);
-    const m = sub.match(/^\[Pasted text #\d+ \+\d+ lines\]$/);
-    if (m) return { start: idx, end: pos };
-    return null;
+    return expandPastedPlaceholders(text, (id) => pastedChunksRef.current.get(id)?.content);
   };
 
   /** 处理单个普通输入字符/按键（非粘贴） */
@@ -238,9 +200,9 @@ export default function MultilineInput({
 
     // Alt+Enter → 插入换行
     if (raw === '\x1B\r' || raw === '\x1B\n') {
-      const newVal = v.slice(0, c) + '\n' + v.slice(c);
-      emitChange(newVal);
-      setCursor(c + 1);
+      const result = insertTextAtCursor(v, c, '\n');
+      emitChange(result.value);
+      setCursor(result.cursor);
       return;
     }
 
@@ -263,13 +225,13 @@ export default function MultilineInput({
         if (ph) {
           const match = v.slice(ph.start, ph.end).match(/\[Pasted text #(\d+)/);
           if (match) pastedChunksRef.current.delete(parseInt(match[1], 10));
-          const newVal = v.slice(0, ph.start) + v.slice(ph.end);
-          emitChange(newVal);
-          setCursor(ph.start);
+          const result = removeTextRange(v, ph.start, ph.end);
+          emitChange(result.value);
+          setCursor(result.cursor);
         } else {
-          const newVal = v.slice(0, c - 1) + v.slice(c);
-          emitChange(newVal);
-          setCursor(c - 1);
+          const result = removeTextRange(v, c - 1, c);
+          emitChange(result.value);
+          setCursor(result.cursor);
         }
       }
       return;
@@ -334,79 +296,13 @@ export default function MultilineInput({
     if (raw.startsWith('\x1B[') || raw.startsWith('\x1B]') || raw.startsWith('\x1BO')) return;
 
     // 可打印字符 → 在光标位置插入
-    const newVal = v.slice(0, c) + raw + v.slice(c);
-    emitChange(newVal);
-    setCursor(c + raw.length);
-  };
-
-  /**
-   * 处理批量缓冲区中积累的数据。
-   * 如果缓冲区包含换行（多行），视为粘贴；否则逐字符处理。
-   */
-  const flushBatchBuffer = () => {
-    const buf = batchBufferRef.current;
-    batchBufferRef.current = '';
-    batchTimerRef.current = null;
-    if (!buf) return;
-
-    const cleaned = buf.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-    // 多行 → 粘贴
-    if (cleaned.includes('\n') && cleaned.length > 1) {
-      insertPaste(cleaned);
-      return;
-    }
-
-    // 检测是否为 IME composing 输入（连续小写字母 = 拼音）
-    if (isAsciiLowerAlpha(buf)) {
-      // 可能是拼音 composing，进入 IME 缓冲模式
-      imeBufferRef.current += buf;
-      // 不更新 value/不触发 re-render，只重置 IME 超时
-      if (imeTimerRef.current !== null) {
-        clearTimeout(imeTimerRef.current);
-      }
-      imeTimerRef.current = setTimeout(flushImeBuffer, IME_COMPOSE_WINDOW_MS);
-      return;
-    }
-
-    // 收到非 ASCII 字符（中文等）：如果有 IME 缓冲，说明 composing 结束
-    if (hasNonAscii(buf) && imeBufferRef.current.length > 0) {
-      // 丢弃之前积累的拼音字母（它们只是 composing 中间态），
-      // 回退已临时插入的 composing 文本
-      if (imeTimerRef.current !== null) {
-        clearTimeout(imeTimerRef.current);
-        imeTimerRef.current = null;
-      }
-      const insertedLen = imeInsertedLenRef.current;
-      imeBufferRef.current = '';
-      imeInsertedLenRef.current = 0;
-      if (insertedLen > 0) {
-        // 回退之前临时插入的拼音
-        const v = valueRef.current;
-        const c = cursorRef.current;
-        const newVal = v.slice(0, c - insertedLen) + v.slice(c);
-        emitChange(newVal);
-        setCursor(c - insertedLen);
-      }
-      // 插入最终的中文字符
-      handleNormalInput(buf);
-      return;
-    }
-
-    // 收到非拼音的 ASCII 可打印字符，且有 IME 缓冲：先提交 IME 缓冲
-    if (imeBufferRef.current.length > 0) {
-      commitImeBuffer();
-    }
-
-    // 单字符或单行短文本，按普通输入处理
-    handleNormalInput(buf);
+    const result = insertTextAtCursor(v, c, raw);
+    emitChange(result.value);
+    setCursor(result.cursor);
   };
 
   /** 提交 IME 缓冲区中的拼音为普通文本（composing 超时或被打断时调用） */
   const commitImeBuffer = () => {
-    if (imeTimerRef.current !== null) {
-      clearTimeout(imeTimerRef.current);
-      imeTimerRef.current = null;
-    }
     const buf = imeBufferRef.current;
     const insertedLen = imeInsertedLenRef.current;
     imeBufferRef.current = '';
@@ -421,266 +317,54 @@ export default function MultilineInput({
 
   /** IME composing 超时：将积累的拼音作为普通文本提交 */
   const flushImeBuffer = () => {
-    imeTimerRef.current = null;
     commitImeBuffer();
   };
 
-  // Alt+Enter 组合键检测：ESC 可能单独到达，需要等待后续字符
-  const escTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const ESC_WAIT_MS = 50; // 等待后续字符的时间窗口
-
-  useEffect(() => {
-    if (!stdin || !isActive) return;
-
-    const onData = (data: Buffer) => {
-      const raw = data.toString('utf-8');
-
-      // === Bracketed paste 模式处理（优先级最高） ===
-      if (raw.includes('\x1B[200~')) {
-        const startIdx = raw.indexOf('\x1B[200~') + 6;
-        const endIdx = raw.indexOf('\x1B[201~');
-        if (endIdx !== -1) {
-          insertPaste(raw.slice(startIdx, endIdx));
-        } else {
-          pasteBufferRef.current = raw.slice(startIdx);
-        }
-        return;
-      }
-      if (pasteBufferRef.current !== null) {
-        const endIdx = raw.indexOf('\x1B[201~');
-        if (endIdx !== -1) {
-          pasteBufferRef.current += raw.slice(0, endIdx);
-          insertPaste(pasteBufferRef.current);
-          pasteBufferRef.current = null;
-        } else {
-          pasteBufferRef.current += raw;
-        }
-        return;
-      }
-
-      // === 处理 ESC 等待状态：上一次收到了单独的 ESC，现在看后续字符 ===
-      if (escTimerRef.current !== null) {
-        clearTimeout(escTimerRef.current);
-        escTimerRef.current = null;
-        if (raw === '\r' || raw === '\n') {
-          // ESC + Enter = Alt+Enter → 插入换行
-          handleNormalInput('\x1B\r');
-          return;
-        }
-        // ESC + 其他字符：先处理 ESC 本身，再处理当前字符
-        handleNormalInput('\x1B');
-        // 继续往下处理当前 raw
-      }
-
-      // === 非 bracketed paste：用时间窗口检测 ===
-      // 控制字符和转义序列不参与批量缓冲，直接处理
-      const isSingleControl =
-        raw === '\r' || raw === '\n' ||
-        raw === '\x7F' || raw === '\x08' ||
-        raw === '\t' || raw === '\x1B' ||
-        raw === '\x1B\r' || raw === '\x1B\n' ||
-        raw.startsWith('\x1B[') || raw.startsWith('\x1B]') || raw.startsWith('\x1BO');
-
-      // Ctrl+C → 不拦截，让上层 useInput 处理双击退出
-      if (raw === '\x03') return;
-
-      // Ctrl+O → 不拦截，让上层 useInput 处理详情展开/折叠
-      if (raw === '\x0F') return;
-
-      // Ctrl+L → 拦截，不穿透到终端（避免清屏）
-      if (raw === '\x0C') return;
-
-      // 单独的 ESC：进入等待状态，看后续是否跟着 Enter（Alt+Enter 组合）
-      if (raw === '\x1B') {
-        escTimerRef.current = setTimeout(() => {
-          escTimerRef.current = null;
-          handleNormalInput('\x1B');
-        }, ESC_WAIT_MS);
-        return;
-      }
-
-      if (isSingleControl && batchBufferRef.current === '') {
-        // 没有正在积累的缓冲，直接处理控制字符
-        // 如果有 IME 缓冲，先提交
-        if (imeBufferRef.current.length > 0) {
-          commitImeBuffer();
-        }
-        handleNormalInput(raw);
-        return;
-      }
-
-      if (isSingleControl && batchBufferRef.current !== '') {
-        // 有缓冲在积累中，控制字符也追加进去（可能是粘贴内容中的 \r）
-        batchBufferRef.current += raw;
-        return;
-      }
-
-      // 可打印字符：追加到批量缓冲，重置定时器
-      batchBufferRef.current += raw;
-      if (batchTimerRef.current !== null) {
-        clearTimeout(batchTimerRef.current);
-      }
-      batchTimerRef.current = setTimeout(flushBatchBuffer, PASTE_DETECT_WINDOW_MS);
-    };
-
-    stdin.prependListener('data', onData);
-    return () => {
-      stdin.off('data', onData);
-      if (batchTimerRef.current !== null) {
-        clearTimeout(batchTimerRef.current);
-        batchTimerRef.current = null;
-      }
-      if (escTimerRef.current !== null) {
-        clearTimeout(escTimerRef.current);
-        escTimerRef.current = null;
-      }
-      if (imeTimerRef.current !== null) {
-        clearTimeout(imeTimerRef.current);
-        imeTimerRef.current = null;
-      }
-    };
-  }, [stdin, isActive]);
-
-  // 组件卸载时清理
-  useEffect(() => {
-    return () => {
-      if (batchTimerRef.current !== null) {
-        clearTimeout(batchTimerRef.current);
-      }
-      if (escTimerRef.current !== null) {
-        clearTimeout(escTimerRef.current);
-      }
-      if (imeTimerRef.current !== null) {
-        clearTimeout(imeTimerRef.current);
-      }
-      if (cursorRelocTimerRef.current !== null) {
-        clearTimeout(cursorRelocTimerRef.current);
-      }
-    };
-  }, []);
-
-  useInput(() => {}, { isActive });
-
-  /**
-   * 将终端物理光标固定到当前行第 3 列，避免 IME composing 从行末溢出。
-   *
-   * 背景：ink 渲染完成后，终端光标停留在最后一行（StatusBar）末尾。
-   * macOS 终端模拟器的内联 IME 会在物理光标位置显示 composing 拼音，
-   * 若光标在行末会导致行宽溢出、TUI 布局被挤压偏移。
-   *
-   * 注意：只能移列，绝对不能移行（\x1B[1A 等）。
-   * ink 增量渲染以当前光标行为起点，移行后每次 re-render 都会导致
-   * TUI 整体上偏移一行（每次输入字符都触发 re-render）。
-   *
-   * 解决方案：仅将列定位到 3（❯ 占 2 列，输入框第一个字符从第 3 列开始），
-   * IME composing 文本从该列开始，不会从行末溢出。
-   */
-  useEffect(() => {
-    // 取消之前的定时器
-    if (cursorRelocTimerRef.current !== null) {
-      clearTimeout(cursorRelocTimerRef.current);
-    }
-
-    if (!showCursor || !isActive) {
-      // 非输入状态：将物理光标移到列 1（行首），避免 IME 候选框在可见区域弹出
-      cursorRelocTimerRef.current = setTimeout(() => {
-        cursorRelocTimerRef.current = null;
-        process.stdout.write('\x1B[1G');
-      }, 80);
-    } else {
-      // 输入激活状态：
-      // 1. 上移 rowsBelow 行，到达输入框所在行
-      // 2. 将列定位到 3（❯ 占 2 列，输入框第一个字符从第 3 列开始）
-      // 3. 下移 rowsBelow 行，回到原来的光标行（ink 渲染起点不变）
-      // 这样 IME composing 显示在输入框行而非 StatusBar 行
-      cursorRelocTimerRef.current = setTimeout(() => {
-        cursorRelocTimerRef.current = null;
-        const up = rowsBelow > 0 ? `\x1B[${rowsBelow}A` : '';
-        const down = rowsBelow > 0 ? `\x1B[${rowsBelow}B` : '';
-        process.stdout.write(`${up}\x1B[3G${down}`);
-      }, 80);
-    }
-
-    return () => {
-      if (cursorRelocTimerRef.current !== null) {
-        clearTimeout(cursorRelocTimerRef.current);
-        cursorRelocTimerRef.current = null;
-      }
-    };
-  });
-
-  // --- 渲染 ---
-  const isEmpty = value.length === 0;
-
-  if (isEmpty) {
-    // value 清空时重置粘贴状态
-    if (pasteCountRef.current > 0) {
-      pasteCountRef.current = 0;
-      pastedChunksRef.current.clear();
-    }
-    // 更新光标位置信息（空输入时光标在起始位置）
-    if (showCursor && placeholder.length > 0) {
-      return (
-        <Box>
-          <Text inverse color="white">{placeholder[0]}</Text>
-          <Text color="gray">{placeholder.slice(1)}</Text>
-          <Text color="gray" dimColor>  [Tab]</Text>
-        </Box>
-      );
-    }
-    return (
-      <Box>
-        {showCursor && <Text inverse> </Text>}
-        <Text color="gray">{placeholder}</Text>
-      </Box>
-    );
-  }
-
-  const lines = value.split('\n');
-  const { row: cursorRow, col: cursorCol } = getCursorRowCol(value, cursor);
-
-  /** 渲染一段文本，将其中的占位符高亮 */
-  const renderWithPlaceholders = (text: string, keyPrefix: string): React.ReactNode[] => {
-    const parts: React.ReactNode[] = [];
-    let lastIndex = 0;
-    const re = new RegExp(PASTE_PLACEHOLDER_RE.source, 'g');
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(text)) !== null) {
-      if (m.index > lastIndex) {
-        parts.push(<Text key={`${keyPrefix}-t-${lastIndex}`}>{text.slice(lastIndex, m.index)}</Text>);
-      }
-      parts.push(
-        <Text key={`${keyPrefix}-p-${m.index}`} color="cyan" dimColor>{m[0]}</Text>
-      );
-      lastIndex = m.index + m[0].length;
-    }
-    if (lastIndex < text.length) {
-      parts.push(<Text key={`${keyPrefix}-t-${lastIndex}`}>{text.slice(lastIndex)}</Text>);
-    }
-    return parts;
+  const clearImeBufferWithInsertedLenRollback = () => {
+    const insertedLen = imeInsertedLenRef.current;
+    imeBufferRef.current = '';
+    imeInsertedLenRef.current = 0;
+    if (insertedLen <= 0) return;
+    const v = valueRef.current;
+    const c = cursorRef.current;
+    const result = removeTextRange(v, c - insertedLen, c);
+    emitChange(result.value);
+    setCursor(result.cursor);
   };
 
+  useMultilineInputStream({
+    stdin: stdin ?? undefined,
+    isActive,
+    pasteDetectWindowMs: PASTE_DETECT_WINDOW_MS,
+    imeComposeWindowMs: IME_COMPOSE_WINDOW_MS,
+    isAsciiLowerAlpha,
+    hasNonAscii,
+    insertPaste,
+    handleNormalInput,
+    commitImeBuffer,
+    flushImeBuffer,
+    appendImeBuffer: (text) => {
+      imeBufferRef.current += text;
+    },
+    getImeBuffer: () => imeBufferRef.current,
+    clearImeBufferWithInsertedLenRollback,
+  });
+
+  useInput(() => {}, { isActive });
+  useTerminalCursorSync({ showCursor, isActive, rowsBelow });
+
   return (
-    <Box flexDirection="column">
-      {lines.map((line, i) => {
-        if (!showCursor || i !== cursorRow) {
-          const parts = renderWithPlaceholders(line, `l${i}`);
-          return <Box key={i}>{parts.length > 0 ? parts : <Text> </Text>}</Box>;
+    <InputTextView
+      value={value}
+      cursor={cursor}
+      placeholder={placeholder}
+      showCursor={showCursor}
+      onResetPastedChunks={() => {
+        if (pasteCountRef.current > 0) {
+          pasteCountRef.current = 0;
+          pastedChunksRef.current.clear();
         }
-
-        // 光标所在行
-        const before = line.slice(0, cursorCol);
-        const cursorChar = line[cursorCol] ?? ' ';
-        const after = line.slice(cursorCol + 1);
-
-        return (
-          <Box key={i}>
-            {renderWithPlaceholders(before, 'b')}
-            <Text inverse>{cursorChar}</Text>
-            {renderWithPlaceholders(after, 'a')}
-          </Box>
-        );
-      })}
-    </Box>
+      }}
+    />
   );
 }

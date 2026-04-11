@@ -95,7 +95,6 @@ async function executeSkillScript(
   skill: SkillDefinition,
   args: Record<string, unknown>,
 ): Promise<string> {
-  const funcName = skill.meta.name.replace(/-/g, '_');
   const kwargs: string[] = [];
 
   for (const [key, value] of Object.entries(args)) {
@@ -121,8 +120,16 @@ async function executeSkillScript(
   const pyCode = [
     'import sys,os,json',
     `sys.path.insert(0, ${JSON.stringify(path.dirname(scriptPath))})`,
-    `from skill import ${funcName}`,
-    `result = ${funcName}(${kwargs.join(', ')})`,
+    'import skill as skill_module',
+    `tool_name = getattr(skill_module, "TOOL_METADATA", {}).get("name") or ${JSON.stringify(skill.meta.name.replace(/-/g, '_'))}`,
+    'func = getattr(skill_module, tool_name, None)',
+    'if func is None:',
+    '    candidates = [name for name, value in vars(skill_module).items() if callable(value) and not name.startswith("_")]',
+    '    if len(candidates) == 1:',
+    '        func = getattr(skill_module, candidates[0])',
+    '    else:',
+    '        raise ImportError(f"未找到可调用函数: {tool_name}，候选: {candidates}")',
+    `result = func(${kwargs.join(', ')})`,
     'print(json.dumps(result, ensure_ascii=False, indent=2))',
   ].join('\n');
 
