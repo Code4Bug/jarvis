@@ -104,6 +104,78 @@ function ensureFrontmatterDescription(skillMd: string, description: string): str
   return skillMd.replace(/\n---/, `\ndescription: ${description}\n---`);
 }
 
+function decodeLooseJsonString(value: string): string {
+  return value
+    .replace(/\\"/g, '"')
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\r')
+    .replace(/\\t/g, '\t')
+    .replace(/\\\\/g, '\\');
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function extractLooseField(jsonStr: string, key: string, nextKeys: string[]): string | undefined {
+  const keyPattern = new RegExp(`"${escapeRegExp(key)}"\\s*:\\s*"`, 'm');
+  const keyMatch = keyPattern.exec(jsonStr);
+  if (!keyMatch) return undefined;
+
+  const valueStart = keyMatch.index + keyMatch[0].length;
+  let valueEnd = jsonStr.length;
+
+  for (const nextKey of nextKeys) {
+    const nextPattern = new RegExp(`"\\s*,\\s*\\n\\s*"${escapeRegExp(nextKey)}"\\s*:`, 'm');
+    const tail = jsonStr.slice(valueStart);
+    const nextMatch = nextPattern.exec(tail);
+    if (nextMatch) {
+      valueEnd = Math.min(valueEnd, valueStart + nextMatch.index);
+    }
+  }
+
+  if (nextKeys.length === 0) {
+    const tail = jsonStr.slice(valueStart);
+    const tailMatch = /"\s*\n?\s*}/m.exec(tail);
+    if (tailMatch) {
+      valueEnd = valueStart + tailMatch.index;
+    }
+  }
+
+  const rawValue = jsonStr.slice(valueStart, valueEnd);
+  return decodeLooseJsonString(rawValue);
+}
+
+function parseSkillJsonResult(jsonStr: string): {
+  name: string;
+  description: string;
+  argument_hint?: string;
+  skill_md: string;
+  skill_py?: string;
+} {
+  try {
+    return JSON.parse(jsonStr);
+  } catch {
+    const name = extractLooseField(jsonStr, 'name', ['description', 'argument_hint', 'skill_md', 'skill_py']);
+    const description = extractLooseField(jsonStr, 'description', ['argument_hint', 'skill_md', 'skill_py']);
+    const argument_hint = extractLooseField(jsonStr, 'argument_hint', ['skill_md', 'skill_py']);
+    const skill_md = extractLooseField(jsonStr, 'skill_md', ['skill_py']);
+    const skill_py = extractLooseField(jsonStr, 'skill_py', []);
+
+    if (!name || !description || !skill_md) {
+      throw new Error('无法从 LLM 输出中提取必要字段 (name, description, skill_md)');
+    }
+
+    return {
+      name: name.trim(),
+      description: description.trim(),
+      argument_hint: argument_hint?.trim() || undefined,
+      skill_md,
+      skill_py: skill_py || undefined,
+    };
+  }
+}
+
 /**
  * 调用 LLM 生成 skill 内容
  *
@@ -202,7 +274,7 @@ async function callLLMForSkill(requirement: string): Promise<{
   }
 
   try {
-    const parsed = JSON.parse(jsonStr);
+    const parsed = parseSkillJsonResult(jsonStr);
     if (!parsed.name || !parsed.skill_md) {
       throw new Error('LLM 返回的 JSON 缺少必要字段 (name, skill_md)');
     }
