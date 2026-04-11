@@ -9,7 +9,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { execSync } from 'child_process';
-import { APP_NAME, APP_VERSION } from '../config/constants.js';
+import { APP_VERSION, getAppName } from '../config/constants.js';
 import { LLMServiceImpl, getDefaultConfig } from '../services/api/llm.js';
 import { TranscriptMessage } from '../types/index.js';
 import { allTools } from '../tools/index.js';
@@ -378,7 +378,7 @@ function renderJarvisMd(input: {
     md.push(`- ${line}`);
   }
   md.push('');
-  md.push(`> 由 ${APP_NAME} /init 自动生成`);
+  md.push(`> 由 ${getAppName()} /init 自动生成`);
   md.push('');
   return md.join('\n');
 }
@@ -551,7 +551,7 @@ function generateBasicJarvisMd(input: {
   md.push('');
   md.push('- 本文件为自动生成结果；若需更准确的业务背景，请补充 README 或项目文档。');
   md.push('');
-  md.push(`> 由 ${APP_NAME} /init 自动生成`);
+  md.push(`> 由 ${getAppName()} /init 自动生成`);
   md.push('');
   return md.join('\n');
 }
@@ -579,7 +579,7 @@ export async function executeInit(): Promise<InitResult> {
   // ===== 构建终端显示文本 =====
   const display: string[] = [];
 
-  display.push(`${APP_NAME} ${APP_VERSION} - 项目初始化`);
+  display.push(`${getAppName()} ${APP_VERSION} - 项目初始化`);
   display.push('');
 
   // 项目基本信息

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { APP_NAME, APP_VERSION, MODEL_NAME } from '../config/constants.js';
+import { APP_VERSION, getAppName, getModelName } from '../config/constants.js';
 
 function truncatePath(p: string, max: number): string {
   if (p.length <= max) return p;
@@ -21,6 +21,8 @@ const LOGO_COLORS: Array<string> = ['cyan', 'cyan', 'blueBright', 'blueBright', 
 function WelcomeHeader({ width }: { width: number }) {
   const maxPath = Math.max(width - 10, 20);
   const showLogo = width >= 52;
+  const appName = getAppName();
+  const modelName = getModelName();
 
   return (
     <Box flexDirection="column" paddingX={1} width={width}>
@@ -48,8 +50,8 @@ function WelcomeHeader({ width }: { width: number }) {
       {/* 信息行 */}
       <Box marginTop={0}>
         <Text color="gray">model </Text>
-        <Text color="cyan">{MODEL_NAME}</Text>
-        <Text color="gray">  {APP_NAME} </Text>
+        <Text color="cyan">{modelName}</Text>
+        <Text color="gray">  {appName} </Text>
         <Text color="magenta">{APP_VERSION}</Text>
       </Box>
       <Box>

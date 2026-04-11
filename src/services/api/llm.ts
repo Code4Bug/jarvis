@@ -10,7 +10,7 @@
 import { LLMService, StreamCallbacks, TranscriptMessage, Tool, ContentBlock, AbortSignal as AppAbortSignal } from '../../types/index.js';
 import { ModelConfig, loadConfig, getActiveModel } from '../../config/loader.js';
 import { getAgent } from '../../agents/index.js';
-import { DEFAULT_AGENT } from '../../config/constants.js';
+import { getDefaultAgent } from '../../config/constants.js';
 import { getActiveAgent } from '../../config/agentState.js';
 import { getSystemInfoPrompt } from '../../config/systemInfo.js';
 import { getCachedUserProfile } from '../../config/userProfile.js';
@@ -239,7 +239,7 @@ export class LLMServiceImpl implements LLMService {
     }
 
     // 从当前激活的智能体加载 system prompt（运行时动态读取）
-    const currentAgent = getActiveAgent(DEFAULT_AGENT);
+    const currentAgent = getActiveAgent(getDefaultAgent());
     const agent = getAgent(currentAgent);
     const agentPrompt = agent?.systemPrompt
       ?? '你是一个强大的终端智能助手。回答时使用中文，简洁明了。当需要操作文件系统或执行命令时，请调用对应的工具。';

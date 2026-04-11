@@ -1,6 +1,10 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import os from 'os';
+import { loadConfig, getActiveModel } from './loader.js';
+import { getAgent } from '../agents/index.js';
+import { getActiveAgent } from './agentState.js';
 
 /** 从 package.json 动态读取版本号 */
 function resolveAppVersion(): string {
@@ -22,7 +26,6 @@ export const PROJECT_NAME = path.basename(process.cwd());
 export const MAX_ITERATIONS = 50;
 
 /** 会话存储目录（~/.jarvis/sessions/） */
-import os from 'os';
 export const JARVIS_HOME_DIR = path.join(os.homedir(), '.jarvis');
 export const SESSIONS_DIR = path.join(JARVIS_HOME_DIR, 'sessions');
 export const LOGS_DIR = path.join(JARVIS_HOME_DIR, 'logs');
@@ -31,26 +34,33 @@ export const LOGS_DIR = path.join(JARVIS_HOME_DIR, 'logs');
 export const HIDE_WELCOME_AFTER_INPUT = false;
 
 /** 从配置文件获取当前模型名称 */
-import { loadConfig, getActiveModel } from './loader.js';
-
-const _cfg = loadConfig();
-
-function resolveModelName(): string {
+export function getModelName(): string {
   try {
-    const active = getActiveModel(_cfg);
-    return active?.model ?? _cfg.system.model ?? 'unknown';
+    const config = loadConfig();
+    const active = getActiveModel(config);
+    return active?.model ?? config.system.model ?? 'unknown';
   } catch {
     return 'unknown';
   }
 }
 
-export const MODEL_NAME = resolveModelName();
-
 /** 是否支持思考/非思考模式切换，默认 false（隐藏该功能） */
-export const ENABLE_THINKING_MODE_TOGGLE = _cfg.system.enable_thinking_mode_toggle ?? false;
+export function isThinkingModeToggleEnabled(): boolean {
+  try {
+    return loadConfig().system.enable_thinking_mode_toggle ?? false;
+  } catch {
+    return false;
+  }
+}
 
 /** 上下文 token 上限 */
-export const CONTEXT_TOKEN_LIMIT = _cfg.system.context_token_limit ?? 18000;
+export function getContextTokenLimit(): number {
+  try {
+    return loadConfig().system.context_token_limit ?? 18000;
+  } catch {
+    return 18000;
+  }
+}
 
 // ===== 智能体默认配置 =====
 
@@ -68,20 +78,16 @@ export const DEFAULT_AGENT_EMOJI = '>';
 
 // ===== 动态应用名称（跟随激活智能体） =====
 
-import { getAgent } from '../agents/index.js';
-import { getActiveAgent } from './agentState.js';
-
 /** 当前激活的智能体名称 — 启动时从 ~/.jarvis/agent.json 读取，运行时可切换 */
-export const DEFAULT_AGENT = getActiveAgent(DEFAULT_AGENT_FALLBACK);
+export function getDefaultAgent(): string {
+  return getActiveAgent(DEFAULT_AGENT_FALLBACK);
+}
 
-function resolveAppName(): string {
+export function getAppName(): string {
   try {
-    const agent = getAgent(DEFAULT_AGENT);
+    const agent = getAgent(getDefaultAgent());
     return agent?.meta.name ?? 'Jarvis';
   } catch {
     return 'Jarvis';
   }
 }
-
-/** 应用名称 — 取自当前激活智能体的 name */
-export const APP_NAME = resolveAppName();

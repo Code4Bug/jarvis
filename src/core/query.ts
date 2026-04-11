@@ -12,7 +12,7 @@ import {
   ToolCallInfo,
 } from '../types/index.js';
 import { findToolMerged as findTool } from '../tools/index.js';
-import { MAX_ITERATIONS, CONTEXT_TOKEN_LIMIT } from '../config/constants.js';
+import { MAX_ITERATIONS, getContextTokenLimit } from '../config/constants.js';
 import { sanitizeOutput, validateCommand, authorizeCommand, authorizeRule } from './safeguard.js';
 import { logError, logInfo, logWarn } from './logger.js';
 
@@ -43,6 +43,7 @@ function estimateTokens(text: string): number {
  * - 确保总估算 token 不超过 CONTEXT_TOKEN_LIMIT
  */
 function compressTranscript(transcript: TranscriptMessage[]): TranscriptMessage[] {
+  const contextTokenLimit = getContextTokenLimit();
   // 单条工具结果最大字符数
   const MAX_TOOL_RESULT_CHARS = 3000;
   // 旧条目压缩到的字符数
@@ -67,7 +68,7 @@ function compressTranscript(transcript: TranscriptMessage[]): TranscriptMessage[
     return JSON.stringify(m.content);
   }).join(''));
 
-  if (totalTokens <= CONTEXT_TOKEN_LIMIT) return result;
+  if (totalTokens <= contextTokenLimit) return result;
 
   // 找出所有 tool_result 的索引，保留最近 KEEP_RECENT 条，其余压缩
   const toolResultIndices = result

@@ -90,6 +90,11 @@ export function loadConfig(): JarvisConfig {
   return _cachedConfig;
 }
 
+/** 清空配置缓存，供首次引导写入后重新加载 */
+export function resetConfigCache(): void {
+  _cachedConfig = null;
+}
+
 /** 根据当前配置获取活跃模型配置 */
 export function getActiveModel(config: JarvisConfig): ModelConfig | null {
   const modelName = config.system.model;

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { MODEL_NAME, PROJECT_NAME, ENABLE_THINKING_MODE_TOGGLE, CONTEXT_TOKEN_LIMIT } from '../config/constants.js';
+import { PROJECT_NAME, getContextTokenLimit, getModelName, isThinkingModeToggleEnabled } from '../config/constants.js';
 
 interface StatusBarProps {
   width: number;
@@ -19,14 +19,17 @@ function tokenProgressBar(used: number, limit: number, barWidth: number): { bar:
 }
 
 function StatusBar({ width, totalTokens, activeAgents = 0 }: StatusBarProps) {
-  const left = ` ${MODEL_NAME} │ ${PROJECT_NAME}`;
+  const modelName = getModelName();
+  const contextTokenLimit = getContextTokenLimit();
+  const thinkingModeToggleEnabled = isThinkingModeToggleEnabled();
+  const left = ` ${modelName} │ ${PROJECT_NAME}`;
 
   // 右侧：智能体数量（有后台 Agent 时显示）+ token 进度条 + 思考模式切换（可选）
   const agentPart = activeAgents > 0 ? `⬡ ${activeAgents} agent${activeAgents > 1 ? 's' : ''} │ ` : '';
-  const tokenLabel = `${totalTokens}/${CONTEXT_TOKEN_LIMIT}`;
+  const tokenLabel = `${totalTokens}/${contextTokenLimit}`;
   const barWidth = 10;
-  const { bar, color } = tokenProgressBar(totalTokens, CONTEXT_TOKEN_LIMIT, barWidth);
-  const effortPart = ENABLE_THINKING_MODE_TOGGLE ? ' │ ● medium · /effort' : '';
+  const { bar, color } = tokenProgressBar(totalTokens, contextTokenLimit, barWidth);
+  const effortPart = thinkingModeToggleEnabled ? ' │ ● medium · /effort' : '';
   // 右侧完整文本长度（用于计算间距）
   const rightLen = agentPart.length + tokenLabel.length + 1 + barWidth + effortPart.length + 1;
   const gap = Math.max(width - left.length - rightLen, 1);
@@ -38,7 +41,7 @@ function StatusBar({ width, totalTokens, activeAgents = 0 }: StatusBarProps) {
       {activeAgents > 0 && <Text color="cyan">{agentPart}</Text>}
       <Text color="gray">{tokenLabel} </Text>
       <Text color={color}>{bar}</Text>
-      {ENABLE_THINKING_MODE_TOGGLE && <Text color="gray">{effortPart}</Text>}
+      {thinkingModeToggleEnabled && <Text color="gray">{effortPart}</Text>}
       <Text> </Text>
     </Box>
   );

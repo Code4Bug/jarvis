@@ -8,7 +8,7 @@
 import fs from 'fs';
 import path from 'path';
 import { getAgent } from '../agents/index.js';
-import { DEFAULT_AGENT } from '../config/constants.js';
+import { getDefaultAgent } from '../config/constants.js';
 import { loadConfig, getActiveModel } from '../config/loader.js';
 import { getDefaultConfig } from '../services/api/llm.js';
 
@@ -168,7 +168,7 @@ export function getFallbackHint(agentName?: string): string {
   if (agentName) {
     return FALLBACK_HINTS[agentName.toLowerCase()] ?? DEFAULT_HINT;
   }
-  const agent = getAgent(DEFAULT_AGENT);
+  const agent = getAgent(getDefaultAgent());
   const name = agent?.meta.name ?? 'Jarvis';
   return FALLBACK_HINTS[name.toLowerCase()] ?? DEFAULT_HINT;
 }
@@ -198,7 +198,7 @@ function normalizeHint(raw: string): string {
  * @returns 生成的提示文本，失败时返回静态兜底
  */
 export async function generateAgentHint(): Promise<string> {
-  const agent = getAgent(DEFAULT_AGENT);
+  const agent = getAgent(getDefaultAgent());
   const agentName = agent?.meta.name ?? 'Jarvis';
   const fallback = getFallbackHint(agentName);
 
