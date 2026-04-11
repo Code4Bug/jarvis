@@ -180,12 +180,28 @@ function MessageItem({ msg, showDetails = false }: { msg: Message; showDetails?:
     );
   }
 
+  if (msg.type === 'system' && msg.content) {
+    return (
+      <Box flexDirection="column" marginBottom={1}>
+        <Box flexDirection="row" alignItems="flex-start">
+          <Text color={dotColor}>{dot} </Text>
+          <Box flexDirection="column" flexShrink={1}>
+            <MarkdownText text={msg.content} color="gray" />
+          </Box>
+        </Box>
+        <MessageStats msg={msg} show={showDetails} />
+      </Box>
+    );
+  }
+
   if (msg.status !== 'pending' && msg.content) {
     return (
-      <Box flexDirection="column">
-        <Text color={dotColor}>{dot}</Text>
-        <Box marginLeft={2} flexDirection="column">
-          <MarkdownText text={msg.content} color="gray" />
+      <Box flexDirection="column" marginBottom={1}>
+        <Box flexDirection="row" alignItems="flex-start">
+          <Text color={dotColor}>{dot} </Text>
+          <Box flexDirection="column" flexShrink={1}>
+            <MarkdownText text={msg.content} color="gray" />
+          </Box>
         </Box>
         <MessageStats msg={msg} show={showDetails} />
       </Box>
