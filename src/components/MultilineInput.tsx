@@ -28,6 +28,8 @@ const isAsciiLowerAlpha = (s: string) => /^[a-z]+$/.test(s);
 
 /** 判断字符串是否包含非 ASCII 字符（中文、日文等 CJK 字符） */
 const hasNonAscii = (s: string) => /[^\x00-\x7F]/.test(s);
+const charDisplayWidth = (ch: string) => /[^\u0000-\u00ff]/.test(ch) ? 2 : 1;
+const textDisplayWidth = (text: string) => Array.from(text).reduce((sum, ch) => sum + charDisplayWidth(ch), 0);
 
 interface PastedChunk {
   id: number;
@@ -351,7 +353,20 @@ export default function MultilineInput({
   });
 
   useInput(() => {}, { isActive });
-  useTerminalCursorSync({ showCursor, isActive, rowsBelow });
+  const lines = value.length > 0 ? value.split('\n') : [''];
+  const { row: cursorRow, col: cursorCol } = getCursorRowCol(value, cursor);
+  const activeLine = lines[cursorRow] ?? '';
+  const beforeCursor = activeLine.slice(0, cursorCol);
+  const cursorColumn = 3 + textDisplayWidth(beforeCursor);
+
+  useTerminalCursorSync({
+    showCursor,
+    isActive,
+    rowsBelow,
+    cursorRow,
+    rowsInInput: lines.length,
+    cursorColumn,
+  });
 
   return (
     <InputTextView

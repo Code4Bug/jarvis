@@ -5,6 +5,9 @@ interface UseTerminalCursorSyncOptions {
   showCursor: boolean;
   isActive: boolean;
   rowsBelow: number;
+  cursorRow?: number;
+  rowsInInput?: number;
+  cursorColumn?: number;
   delayMs?: number;
 }
 
@@ -12,6 +15,9 @@ export function useTerminalCursorSync({
   showCursor,
   isActive,
   rowsBelow,
+  cursorRow = 0,
+  rowsInInput = 1,
+  cursorColumn = 3,
   delayMs = 80,
 }: UseTerminalCursorSyncOptions) {
   const cursorRelocTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -41,10 +47,12 @@ export function useTerminalCursorSync({
     } else {
       cursorRelocTimerRef.current = setTimeout(() => {
         cursorRelocTimerRef.current = null;
-        const commandKey = `input:${rowsBelow}:3`;
+        const extraRowsUp = Math.max(rowsInInput - 1 - cursorRow, 0);
+        const safeColumn = Math.max(cursorColumn, 1);
+        const commandKey = `input:${rowsBelow}:${extraRowsUp}:${safeColumn}`;
         if (lastCursorCommandRef.current === commandKey) return;
         lastCursorCommandRef.current = commandKey;
-        relocateCursorToInputLine(rowsBelow, 3);
+        relocateCursorToInputLine(rowsBelow, safeColumn, extraRowsUp);
       }, delayMs);
     }
 
@@ -54,5 +62,5 @@ export function useTerminalCursorSync({
         cursorRelocTimerRef.current = null;
       }
     };
-  }, [showCursor, isActive, rowsBelow, delayMs]);
+  }, [showCursor, isActive, rowsBelow, cursorRow, rowsInInput, cursorColumn, delayMs]);
 }

@@ -20,8 +20,9 @@ export function moveCursorToColumn(column: number): void {
   process.stdout.write(`${ESC}${column}G`);
 }
 
-export function relocateCursorToInputLine(rowsBelow: number, column: number): void {
-  const up = rowsBelow > 0 ? `${ESC}${rowsBelow}A` : '';
-  const down = rowsBelow > 0 ? `${ESC}${rowsBelow}B` : '';
+export function relocateCursorToInputLine(rowsBelow: number, column: number, extraRowsUp = 0): void {
+  const totalRowsUp = Math.max(rowsBelow + extraRowsUp, 0);
+  const up = totalRowsUp > 0 ? `${ESC}${totalRowsUp}A` : '';
+  const down = totalRowsUp > 0 ? `${ESC}${totalRowsUp}B` : '';
   process.stdout.write(`${up}${ESC}${column}G${down}`);
 }
