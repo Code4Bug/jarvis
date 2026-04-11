@@ -139,7 +139,7 @@ jarvis --version
 | 工具名 | 说明 |
 | --- | --- |
 | `read_file` | 读取文件 |
-| `write_file` | 写入文件 |
+| `write_file` | 写入文件，支持整文件覆盖或局部修改 |
 | `run_command` | 执行命令 |
 | `list_directory` | 列出目录内容 |
 | `search_files` | 搜索文件内容 |

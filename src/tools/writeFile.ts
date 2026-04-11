@@ -93,6 +93,47 @@ function applyUnifiedDiff(original: string, diff: string): string {
 }
 
 /**
+ * 基于文本片段做精确替换，适合只改少量代码的场景。
+ */
+function applyStringReplace(
+  original: string,
+  oldString: string,
+  newString: string,
+  replaceAll: boolean,
+  expectedReplacements?: number,
+): string {
+  if (!oldString) {
+    throw new Error('replace 模式下 old_string 不能为空');
+  }
+
+  let matchCount = 0;
+  let searchStart = 0;
+
+  while (true) {
+    const idx = original.indexOf(oldString, searchStart);
+    if (idx === -1) break;
+    matchCount++;
+    searchStart = idx + oldString.length;
+  }
+
+  if (matchCount === 0) {
+    throw new Error('replace 模式未找到要替换的内容');
+  }
+
+  if (expectedReplacements !== undefined && matchCount !== expectedReplacements) {
+    throw new Error(`replace 模式匹配数量不符合预期，期望 ${expectedReplacements}，实际 ${matchCount}`);
+  }
+
+  if (!replaceAll && matchCount !== 1) {
+    throw new Error(`replace 模式要求目标内容唯一，当前匹配到 ${matchCount} 处。请提供更精确的 old_string，或开启 replace_all`);
+  }
+
+  return replaceAll
+    ? original.split(oldString).join(newString)
+    : original.replace(oldString, newString);
+}
+
+/**
  * 写入文件内容（支持安全检测）。
  * 返回写入结果消息。
  */
@@ -116,13 +157,33 @@ function doWrite(filePath: string, content: string): string {
 export const writeFile: Tool = {
   name: 'write_file',
   description:
-    '写入内容到指定文件。支持两种模式：overwrite（默认）完整替换文件内容；diff 模式接收 unified diff 格式补丁，对文件进行增量更新。',
+    '写入内容到指定文件。修改已有文件时优先使用 replace 或 diff 做局部更新，只有新建文件或大范围重写时才使用 overwrite。支持三种模式：overwrite（完整替换）、replace（按文本片段精确替换）、diff（基于 unified diff 增量更新）。',
   parameters: {
     path: { type: 'string', description: '文件路径', required: true },
     content: { type: 'string', description: '文件内容（overwrite 模式必填）', required: false },
     mode: {
       type: 'string',
-      description: '写入模式：overwrite（完整替换，默认）| diff（增量更新）',
+      description: '写入模式：overwrite（完整替换，默认）| replace（局部替换）| diff（增量更新）',
+      required: false,
+    },
+    old_string: {
+      type: 'string',
+      description: 'replace 模式必填：要查找并替换的原始文本片段',
+      required: false,
+    },
+    new_string: {
+      type: 'string',
+      description: 'replace 模式必填：替换后的文本片段',
+      required: false,
+    },
+    replace_all: {
+      type: 'boolean',
+      description: 'replace 模式可选：是否替换所有匹配项，默认 false',
+      required: false,
+    },
+    expected_replacements: {
+      type: 'number',
+      description: 'replace 模式可选：期望匹配数量，不符合时直接报错，防止误替换',
       required: false,
     },
     diff: {
@@ -134,6 +195,29 @@ export const writeFile: Tool = {
   execute: async (args) => {
     const filePath = args.path as string;
     const mode = (args.mode as string) || 'overwrite';
+
+    if (mode === 'replace') {
+      const oldString = args.old_string as string;
+      const newString = (args.new_string as string) ?? '';
+      const replaceAll = Boolean(args.replace_all);
+      const expectedReplacements =
+        args.expected_replacements === undefined ? undefined : Number(args.expected_replacements);
+
+      if (!fs.existsSync(filePath)) {
+        throw new Error(`replace 模式要求目标文件已存在: ${filePath}`);
+      }
+
+      const original = fs.readFileSync(filePath, 'utf-8');
+      const replaced = applyStringReplace(
+        original,
+        oldString,
+        newString,
+        replaceAll,
+        expectedReplacements,
+      );
+
+      return doWrite(filePath, replaced);
+    }
 
     if (mode === 'diff') {
       const diffContent = args.diff as string;
