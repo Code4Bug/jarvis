@@ -43,6 +43,7 @@ export default function REPL() {
   const [placeholder, setPlaceholder] = useState('');
   const [activeAgents, setActiveAgents] = useState(getActiveAgentCount());
   const lastEscRef = useRef<number>(0);
+  const abortRequestedRef = useRef(false);
   const lastAbortNoticeRef = useRef(0);
 
   const sessionRef = useRef<Session>({
@@ -81,6 +82,34 @@ export default function REPL() {
     }]);
   }, []);
 
+  const markPendingMessagesAborted = useCallback(() => {
+    setMessages((prev) => prev
+      .filter((msg) => !(msg.type === 'thinking' && msg.status === 'pending'))
+      .map((msg) => {
+        if (msg.status !== 'pending') return msg;
+        if (msg.type === 'tool_exec') {
+          return {
+            ...msg,
+            status: 'aborted',
+            content: `${msg.toolName || '工具'} 已中断`,
+            abortHint: msg.abortHint ?? '命令已中断（ESC）',
+          };
+        }
+        return msg;
+      }));
+    finishThinking();
+    clearStream();
+  }, [clearStream, finishThinking]);
+
+  const requestAbort = useCallback(() => {
+    if (!isProcessing || !engineRef.current || abortRequestedRef.current) return;
+    abortRequestedRef.current = true;
+    logWarn('ui.abort_by_escape');
+    markPendingMessagesAborted();
+    appendAbortNotice();
+    engineRef.current.abort();
+  }, [appendAbortNotice, isProcessing, markPendingMessagesAborted]);
+
   // ===== 新会话逻辑 =====
   const handleNewSession = useCallback(() => {
     logInfo('ui.new_session');
@@ -92,6 +121,7 @@ export default function REPL() {
     clearStream();
     setLoopState(null);
     setIsProcessing(false);
+    abortRequestedRef.current = false;
     setShowWelcome(true);
     resetTokens();
     generateAgentHint().then((hint) => setPlaceholder(hint)).catch(() => {});
@@ -175,6 +205,7 @@ export default function REPL() {
       if (state.isRunning) {
         startStreamTimer();
       } else {
+        abortRequestedRef.current = false;
         stopAll();
       }
     },
@@ -260,6 +291,7 @@ export default function REPL() {
           if (HIDE_WELCOME_AFTER_INPUT) setShowWelcome(false);
           pushHistory(trimmed);
           clearStream();
+          abortRequestedRef.current = false;
           await engineRef.current.handleQuery(prompt, callbacks);
           return;
         }
@@ -320,6 +352,7 @@ export default function REPL() {
       pushHistory(trimmed);
       setInput('');
       clearStream();
+      abortRequestedRef.current = false;
       await engineRef.current.handleQuery(trimmed, callbacks);
     },
     [isProcessing, pushHistory, clearStream, slashMenu, handleNewSession],
@@ -422,11 +455,7 @@ export default function REPL() {
     // processing 状态下，仅允许 Ctrl+C（退出）和 ESC（中断）
     if (isProcessing) {
       if (key.ctrl && ch === 'c') { handleCtrlC(); return; }
-      if (key.escape && engineRef.current) {
-        appendAbortNotice();
-        engineRef.current.abort();
-        return;
-      }
+      if (key.escape) { requestAbort(); return; }
       if (key.ctrl && ch === 'o') { setShowDetails((prev) => !prev); return; }
       return; // 丢弃其他所有按键
     }
@@ -451,10 +480,8 @@ export default function REPL() {
       return;
     }
     if (key.escape) {
-      if (isProcessing && engineRef.current) {
-        logWarn('ui.abort_by_escape');
-        appendAbortNotice();
-        engineRef.current.abort();
+      if (isProcessing) {
+        requestAbort();
       } else if (input.length > 0) {
         const now = Date.now();
         if (now - lastEscRef.current < 500) {

@@ -43,6 +43,56 @@ await tsImport(workerData.__workerFile, pathToFileURL(workerData.__workerFile).h
 
 export class WorkerBridge {
   private worker: Worker | null = null;
+  private currentRun: {
+    worker: Worker;
+    resolve: (transcript: TranscriptMessage[]) => void;
+    reject: (error: Error) => void;
+    transcript: TranscriptMessage[];
+    userInput: string;
+    callbacks: EngineCallbacks;
+    settled: boolean;
+    abortTimer: ReturnType<typeof setTimeout> | null;
+    lastLoopState: { iteration: number; maxIterations: number; isRunning: boolean; aborted: boolean };
+  } | null = null;
+
+  private finalizeRun(
+    worker: Worker,
+    action: 'resolve' | 'reject',
+    payload: TranscriptMessage[] | Error,
+  ) {
+    const run = this.currentRun;
+    if (!run || run.worker !== worker || run.settled) return;
+    run.settled = true;
+    if (run.abortTimer) {
+      clearTimeout(run.abortTimer);
+      run.abortTimer = null;
+    }
+    this.currentRun = null;
+    this.worker = null;
+    worker.terminate().catch(() => {});
+    if (action === 'resolve') {
+      run.resolve(payload as TranscriptMessage[]);
+    } else {
+      run.reject(payload as Error);
+    }
+  }
+
+  private buildAbortedTranscript(transcript: TranscriptMessage[], userInput: string): TranscriptMessage[] {
+    const abortNotice = '[系统提示] 用户中断了上一轮回复（按下 ESC）。上一条助手消息可能不完整，请在后续回复中注意这一点。';
+    const nextTranscript = [...transcript];
+    const lastMessage = nextTranscript[nextTranscript.length - 1];
+
+    if (userInput.trim()) {
+      const hasSameTrailingUserInput =
+        lastMessage?.role === 'user' && lastMessage.content === userInput;
+      if (!hasSameTrailingUserInput) {
+        nextTranscript.push({ role: 'user', content: userInput });
+      }
+    }
+
+    nextTranscript.push({ role: 'user', content: abortNotice });
+    return nextTranscript;
+  }
 
   /** 在独立 Worker 线程中执行查询，返回更新后的 transcript */
   run(
@@ -55,6 +105,22 @@ export class WorkerBridge {
       const workerTsPath = path.join(__dirname, 'queryWorker.ts');
       const worker = createWorker(workerTsPath);
       this.worker = worker;
+      this.currentRun = {
+        worker,
+        resolve,
+        reject,
+        transcript,
+        userInput,
+        callbacks,
+        settled: false,
+        abortTimer: null,
+        lastLoopState: {
+          iteration: 0,
+          maxIterations: 0,
+          isRunning: true,
+          aborted: false,
+        },
+      };
       logInfo('worker_bridge.run.start', {
         inputLength: userInput.length,
         transcriptLength: transcript.length,
@@ -75,6 +141,9 @@ export class WorkerBridge {
             callbacks.onClearStreamText?.();
             break;
           case 'loop_state':
+            if (this.currentRun?.worker === worker) {
+              this.currentRun.lastLoopState = msg.state;
+            }
             callbacks.onLoopStateChange(msg.state);
             break;
           case 'session_update':
@@ -168,33 +237,27 @@ export class WorkerBridge {
           }
 
           case 'done':
-            this.worker = null;
-            worker.terminate();
             logInfo('worker_bridge.run.done', {
               transcriptLength: msg.transcript.length,
             });
-            resolve(msg.transcript);
+            this.finalizeRun(worker, 'resolve', msg.transcript);
             break;
           case 'error':
-            this.worker = null;
-            worker.terminate();
             logError('worker_bridge.run.error', msg.message);
-            reject(new Error(msg.message));
+            this.finalizeRun(worker, 'reject', new Error(msg.message));
             break;
         }
       });
 
       worker.on('error', (err) => {
-        this.worker = null;
         logError('worker_bridge.worker_error', err);
-        reject(err);
+        this.finalizeRun(worker, 'reject', err);
       });
 
       worker.on('exit', (code) => {
-        if (code !== 0 && this.worker) {
-          this.worker = null;
+        if (code !== 0 && this.currentRun?.worker === worker && !this.currentRun.settled) {
           logError('worker_bridge.worker_exit_abnormal', undefined, { code });
-          reject(new Error(`Worker 异常退出，code=${code}`));
+          this.finalizeRun(worker, 'reject', new Error(`Worker 异常退出，code=${code}`));
         }
       });
 
@@ -206,10 +269,21 @@ export class WorkerBridge {
 
   /** 向 Worker 发送中断信号 */
   abort() {
-    if (this.worker) {
-      logWarn('worker_bridge.abort_forwarded');
-      const msg: WorkerInbound = { type: 'abort' };
-      this.worker.postMessage(msg);
-    }
+    const run = this.currentRun;
+    if (!run || run.settled) return;
+    logWarn('worker_bridge.abort_forwarded');
+    const msg: WorkerInbound = { type: 'abort' };
+    run.worker.postMessage(msg);
+    run.callbacks.onClearStreamText?.();
+    run.callbacks.onLoopStateChange({
+      ...run.lastLoopState,
+      isRunning: false,
+      aborted: true,
+    });
+    run.abortTimer = setTimeout(() => {
+      if (!this.currentRun || this.currentRun.worker !== run.worker || this.currentRun.settled) return;
+      logWarn('worker_bridge.abort_force_resolve');
+      this.finalizeRun(run.worker, 'resolve', this.buildAbortedTranscript(run.transcript, run.userInput));
+    }, 120);
   }
 }

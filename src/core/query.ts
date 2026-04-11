@@ -426,21 +426,61 @@ function runToolInWorker(
   abortSignal: { aborted: boolean },
 ): Promise<string> {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    let abortForwarded = false;
+    let abortPollTimer: ReturnType<typeof setInterval> | null = null;
+    let forceTerminateTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const cleanup = () => {
+      if (abortPollTimer !== null) {
+        clearInterval(abortPollTimer);
+        abortPollTimer = null;
+      }
+      if (forceTerminateTimer !== null) {
+        clearTimeout(forceTerminateTimer);
+        forceTerminateTimer = null;
+      }
+    };
+
+    const safeResolve = (result: string) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      worker.terminate().catch(() => {});
+      resolve(result);
+    };
+
+    const safeReject = (err: Error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      worker.terminate().catch(() => {});
+      reject(err);
+    };
+
     const isTsx = __filename.endsWith('.ts');
     const workerScript = isTsx
       ? `
 import { tsImport } from 'tsx/esm/api';
 import { workerData, parentPort } from 'worker_threads';
 import { pathToFileURL } from 'url';
+const abortSignal = { aborted: Boolean(workerData.abortSignal?.aborted) };
+parentPort.on('message', (msg) => {
+  if (msg?.type === 'abort') abortSignal.aborted = true;
+});
 const mod = await tsImport(workerData.__file, pathToFileURL(workerData.__file).href);
-const result = await mod.runToolDirect(workerData.tc, workerData.abortSignal);
-parentPort.postMessage({ result });
+const result = await mod.runToolDirect(workerData.tc, abortSignal);
+parentPort.postMessage({ type: 'result', result });
 `
       : `
 import { runToolDirect } from '${__filename.replace(/\.ts$/, '.js')}';
 import { workerData, parentPort } from 'worker_threads';
-const result = await runToolDirect(workerData.tc, workerData.abortSignal);
-parentPort.postMessage({ result });
+const abortSignal = { aborted: Boolean(workerData.abortSignal?.aborted) };
+parentPort.on('message', (msg) => {
+  if (msg?.type === 'abort') abortSignal.aborted = true;
+});
+const result = await runToolDirect(workerData.tc, abortSignal);
+parentPort.postMessage({ type: 'result', result });
 `;
 
     const worker = new Worker(workerScript, {
@@ -452,16 +492,35 @@ parentPort.postMessage({ result });
       },
     });
 
-    worker.on('message', (msg: { result: string }) => {
-      worker.terminate();
-      resolve(msg.result);
+    abortPollTimer = setInterval(() => {
+      if (!abortSignal.aborted || abortForwarded || settled) return;
+      abortForwarded = true;
+      logWarn('tool.worker.abort_forwarded', { toolName: tc.name });
+      worker.postMessage({ type: 'abort' });
+      forceTerminateTimer = setTimeout(() => {
+        if (settled) return;
+        logWarn('tool.worker.force_terminated', { toolName: tc.name });
+        safeResolve('(工具执行被中断)');
+      }, 1500);
+    }, 50);
+
+    worker.on('message', (msg: { type?: string; result?: string }) => {
+      if (msg.type === 'result') {
+        safeResolve(msg.result ?? '');
+      }
     });
     worker.on('error', (err) => {
-      worker.terminate();
-      reject(err);
+      safeReject(err);
     });
     worker.on('exit', (code) => {
-      if (code !== 0) reject(new Error(`工具 Worker 异常退出 code=${code}`));
+      if (settled) return;
+      if (abortSignal.aborted) {
+        safeResolve('(工具执行被中断)');
+        return;
+      }
+      if (code !== 0) {
+        safeReject(new Error(`工具 Worker 异常退出 code=${code}`));
+      }
     });
   });
 }
