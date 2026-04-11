@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 
 export const USER_PROFILE_PATH = path.join(os.homedir(), '.jarvis', 'USER.md');
+let cachedUserProfile = '';
 
 export function ensureJarvisHomeDir(): string {
   const dir = path.dirname(USER_PROFILE_PATH);
@@ -21,7 +22,22 @@ export function readUserProfile(): string {
   }
 }
 
-export function writeUserProfile(content: string): void {
-  ensureJarvisHomeDir();
-  fs.writeFileSync(USER_PROFILE_PATH, content.trimEnd() + '\n', 'utf-8');
+export function initializeUserProfileCache(): string {
+  cachedUserProfile = readUserProfile();
+  return cachedUserProfile;
 }
+
+export function getCachedUserProfile(): string {
+  return cachedUserProfile;
+}
+
+export function writeUserProfile(content: string, options?: { updateCache?: boolean }): void {
+  ensureJarvisHomeDir();
+  const normalizedContent = content.trimEnd();
+  fs.writeFileSync(USER_PROFILE_PATH, normalizedContent + '\n', 'utf-8');
+  if (options?.updateCache) {
+    cachedUserProfile = normalizedContent;
+  }
+}
+
+initializeUserProfileCache();

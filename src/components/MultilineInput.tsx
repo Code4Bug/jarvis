@@ -248,7 +248,7 @@ export default function MultilineInput({
     if (raw === '\r' || raw === '\n') {
       // 斜杠菜单激活时，回车 = 选中当前项
       if (slashMenuActiveRef.current) {
-        onSlashMenuSelectRef.current?.();
+        onSubmitRef.current(v);
         return;
       }
       const expanded = expandPlaceholders(v);
@@ -314,7 +314,7 @@ export default function MultilineInput({
     if (raw === '\x03') return;
     // 忽略控制字符和转义序列
     if (raw === '\t') {
-      // 斜杠菜单激活时，Tab = 选中当前项
+      // 斜杠菜单激活时，Tab = 补全当前项到输入框
       if (slashMenuActiveRef.current) {
         onSlashMenuSelectRef.current?.();
       } else if (valueRef.current.length === 0) {

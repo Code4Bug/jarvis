@@ -49,6 +49,7 @@ export class WorkerBridge {
     userInput: string,
     transcript: TranscriptMessage[],
     callbacks: EngineCallbacks,
+    options?: { includeUserProfile?: boolean },
   ): Promise<TranscriptMessage[]> {
     return new Promise((resolve, reject) => {
       const workerTsPath = path.join(__dirname, 'queryWorker.ts');
@@ -198,7 +199,7 @@ export class WorkerBridge {
       });
 
       // 启动执行
-      const runMsg: WorkerInbound = { type: 'run', userInput, transcript };
+      const runMsg: WorkerInbound = { type: 'run', userInput, transcript, options };
       worker.postMessage(runMsg);
     });
   }

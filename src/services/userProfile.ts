@@ -72,6 +72,21 @@ function buildProfilePrompt(userInput: string, existingProfile: string): string 
   ].join('\n');
 }
 
+export function shouldIncludeUserProfile(userInput: string): boolean {
+  const normalizedInput = userInput.trim();
+  if (!normalizedInput || normalizedInput.startsWith('/')) return false;
+
+  const lowerInput = normalizedInput.toLowerCase();
+  const personalPattern = /(我|我的|我们|咱们|自己|个人|习惯|偏好|目标|背景|职业|沟通|表达|风格|适合|建议|规划|选择|怎么学|如何学|怎么做|如何做|路线|方向|简历|面试)/;
+  const operationalPattern = /(报错|bug|报错信息|堆栈|traceback|exception|sql|接口|代码|文件|目录|命令|脚本|npm|pnpm|mvn|gradle|git|docker|k8s|kubectl|日志|配置|tsconfig|package\.json|pom\.xml|\.ts|\.tsx|\.js|\.vue|\.java|\.xml|\/)/;
+
+  if (personalPattern.test(normalizedInput)) return true;
+  if (operationalPattern.test(lowerInput)) return false;
+  if (normalizedInput.length <= 12) return false;
+
+  return /(建议|方案|优先级|取舍|节奏|学习|成长|决策)/.test(normalizedInput);
+}
+
 export async function updateUserProfileFromInput(userInput: string): Promise<boolean> {
   const normalizedInput = userInput.trim();
   if (!normalizedInput) return false;

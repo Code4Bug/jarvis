@@ -133,6 +133,9 @@ export interface LLMService {
     tools: Tool[],
     callbacks: StreamCallbacks,
     abortSignal?: AbortSignal,
+    options?: {
+      includeUserProfile?: boolean;
+    },
   ) => Promise<void>;
 }
 

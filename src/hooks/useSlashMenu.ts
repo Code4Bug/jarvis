@@ -2,8 +2,6 @@ import { useState, useCallback } from 'react';
 import { Message } from '../types/index.js';
 import { QueryEngine } from '../core/QueryEngine.js';
 import { filterCommands, filterAgentCommands, SlashCommand } from '../commands/index.js';
-import { setActiveAgent } from '../config/agentState.js';
-import { executeSlashCommand } from '../screens/slashCommands.js';
 
 interface UseSlashMenuOptions {
   engineRef: React.RefObject<QueryEngine | null>;
@@ -31,7 +29,6 @@ export function useSlashMenu(opts: UseSlashMenuOptions) {
     engineRef, sessionRef, tokenCountRef,
     setMessages, setDisplayTokens,
     setLoopState, setIsProcessing, setShowWelcome, setInput, stopAll,
-    onNewSession,
   } = opts;
 
   const [slashMenuVisible, setSlashMenuVisible] = useState(false);
@@ -99,87 +96,77 @@ export function useSlashMenu(opts: UseSlashMenuOptions) {
     }
   }, [engineRef, sessionRef, tokenCountRef, setMessages, setDisplayTokens, stopAll, setLoopState, setIsProcessing, setShowWelcome]);
 
-  // 选中
-  const handleSlashMenuSelect = useCallback(() => {
-    if (slashMenuItems.length === 0) return;
-    const cmd = slashMenuItems[slashMenuIndex];
-    if (!cmd) return;
+  const getSelectedCommand = useCallback((): SlashCommand | null => {
+    if (slashMenuItems.length === 0) return null;
+    return slashMenuItems[slashMenuIndex] ?? null;
+  }, [slashMenuItems, slashMenuIndex]);
 
-    // 二级 agent 菜单
-    if (agentMenuMode) {
-      setActiveAgent(cmd.name);
-      setInput('');
-      setSlashMenuVisible(false);
-      setAgentMenuMode(false);
-      const switchMsg: Message = {
-        id: `switch-${Date.now()}`,
-        type: 'system',
-        status: 'success',
-        content: `已切换智能体为 ${cmd.name}，请重启以生效（Ctrl+C 两次退出后重新启动）`,
-        timestamp: Date.now(),
-      };
-      setMessages((prev) => [...prev, switchMsg]);
-      return;
-    }
-
-    // 二级 resume 菜单
-    if (resumeMenuMode) {
-      setInput('');
-      setSlashMenuVisible(false);
-      setResumeMenuMode(false);
-      resumeSession(cmd.name);
-      return;
-    }
-
-    // 一级菜单选中 /agent -> 进入二级菜单
-    if (cmd.name === 'agent') {
+  const openListCommand = useCallback((commandName: 'agent' | 'resume') => {
+    if (commandName === 'agent') {
       setInput('/agent ');
       const matched = filterAgentCommands('');
       setSlashMenuItems(matched);
       setSlashMenuIndex(0);
       setAgentMenuMode(true);
       setResumeMenuMode(false);
-      return;
+      setSlashMenuVisible(matched.length > 0);
+      return '/agent ';
     }
 
-    // 一级菜单选中 /resume -> 进入二级菜单
-    if (cmd.name === 'resume') {
-      setInput('/resume ');
-      const sessions = QueryEngine.listSessions().slice(0, 20);
-      const items: SlashCommand[] = sessions.map((s) => {
-        const date = new Date(s.updatedAt);
-        const dateStr = `${date.getMonth() + 1}/${date.getDate()} ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
-        return {
-          name: s.id,
-          description: `[${dateStr}] ${s.summary}`,
-          category: 'builtin' as const,
-        };
-      });
-      setSlashMenuItems(items);
-      setSlashMenuIndex(0);
-      setSlashMenuVisible(items.length > 0);
-      setResumeMenuMode(true);
-      setAgentMenuMode(false);
-      return;
-    }
+    const sessions = QueryEngine.listSessions().slice(0, 20);
+    const items: SlashCommand[] = sessions.map((s) => {
+      const date = new Date(s.updatedAt);
+      const dateStr = `${date.getMonth() + 1}/${date.getDate()} ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+      return {
+        name: s.id,
+        description: `[${dateStr}] ${s.summary}`,
+        category: 'builtin' as const,
+        submitMode: 'action' as const,
+      };
+    });
+    setInput('/resume ');
+    setSlashMenuItems(items);
+    setSlashMenuIndex(0);
+    setSlashMenuVisible(items.length > 0);
+    setResumeMenuMode(true);
+    setAgentMenuMode(false);
+    return '/resume ';
+  }, [setInput]);
 
-    // 内置命令：直接执行
-    if (cmd.category === 'builtin') {
-      setInput('');
+  const autocompleteSlashMenuSelection = useCallback((currentInput: string) => {
+    const cmd = getSelectedCommand();
+    if (!cmd) return currentInput;
+
+    // 二级 agent 菜单
+    if (agentMenuMode) {
+      const nextInput = `/agent ${cmd.name}`;
+      setInput(nextInput);
       setSlashMenuVisible(false);
-      if (cmd.name === 'new') {
-        onNewSession();
-        return;
-      }
-      const msg = executeSlashCommand(cmd.name);
-      if (msg) setMessages((prev) => [...prev, msg]);
-      return;
+      return nextInput;
     }
 
-    // 工具命令：填入输入框
-    setInput(`/${cmd.name} `);
-    setSlashMenuVisible(false);
-  }, [slashMenuItems, slashMenuIndex, agentMenuMode, resumeMenuMode, setInput, setMessages, resumeSession]);
+    // 二级 resume 菜单
+    if (resumeMenuMode) {
+      const nextInput = `/resume ${cmd.name}`;
+      setInput(nextInput);
+      setSlashMenuVisible(false);
+      return nextInput;
+    }
+
+    const match = currentInput.match(/^\/\S*/);
+    const suffix = match ? currentInput.slice(match[0].length) : '';
+    const needsTrailingSpace = !suffix && (cmd.submitMode === 'context' || cmd.submitMode === 'list');
+    const nextInput = `/${cmd.name}${suffix}${needsTrailingSpace ? ' ' : ''}`;
+
+    setInput(nextInput);
+
+    if (cmd.submitMode === 'list' && (cmd.name === 'agent' || cmd.name === 'resume') && !suffix.trim()) {
+      return openListCommand(cmd.name);
+    }
+
+    updateSlashMenu(nextInput);
+    return nextInput;
+  }, [agentMenuMode, resumeMenuMode, getSelectedCommand, setInput, openListCommand]);
 
   // 输入变化时更新菜单
   const updateSlashMenu = useCallback((val: string) => {
@@ -204,13 +191,14 @@ export function useSlashMenu(opts: UseSlashMenuOptions) {
         const sessions = QueryEngine.listSessions().slice(0, 20);
         const items: SlashCommand[] = sessions.map((s) => {
           const date = new Date(s.updatedAt);
-          const dateStr = `${date.getMonth() + 1}/${date.getDate()} ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
-          return {
-            name: s.id,
-            description: `[${dateStr}] ${s.summary}`,
-            category: 'builtin' as const,
-          };
-        });
+        const dateStr = `${date.getMonth() + 1}/${date.getDate()} ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+        return {
+          name: s.id,
+          description: `[${dateStr}] ${s.summary}`,
+          category: 'builtin' as const,
+          submitMode: 'action' as const,
+        };
+      });
         const matched = subQuery
           ? items.filter((i) => i.name.includes(subQuery) || i.description.toLowerCase().includes(subQuery))
           : items;
@@ -244,8 +232,10 @@ export function useSlashMenu(opts: UseSlashMenuOptions) {
     resumeMenuMode,
     handleSlashMenuUp,
     handleSlashMenuDown,
-    handleSlashMenuSelect,
     handleSlashMenuClose,
+    getSelectedCommand,
+    autocompleteSlashMenuSelection,
+    openListCommand,
     updateSlashMenu,
     setSlashMenuVisible,
     resumeSession,

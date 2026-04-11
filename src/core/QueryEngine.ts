@@ -18,8 +18,12 @@ import { setActiveAgent } from '../config/agentState.js';
 import { clearAuthorizations } from './safeguard.js';
 import { agentUIBus } from './AgentRegistry.js';
 import { logError, logInfo, logWarn } from './logger.js';
-import { updateUserProfileFromInput } from '../services/userProfile.js';
+import { shouldIncludeUserProfile, updateUserProfileFromInput } from '../services/userProfile.js';
 import { updatePersistentMemoryFromConversation } from '../services/persistentMemory.js';
+import { updateDreamFromSession } from '../services/dream.js';
+
+const DREAM_IDLE_MIN_MS = 5 * 60 * 1000;
+const DREAM_IDLE_JITTER_MS = 5 * 60 * 1000;
 
 export interface EngineCallbacks {
   onMessage: (msg: Message) => void;
@@ -43,12 +47,18 @@ export class QueryEngine {
   private transcript: TranscriptMessage[] = [];
   private workerBridge = new WorkerBridge();
   private memoryUpdateQueue: Promise<void> = Promise.resolve();
+  private userProfileUpdateQueue: Promise<void> = Promise.resolve();
+  private dreamUpdateQueue: Promise<void> = Promise.resolve();
+  private dreamTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastActivityAt = Date.now();
+  private isQueryRunning = false;
 
   constructor() {
     this.service = this.createService();
 
     this.session = this.createSession();
     this.ensureSessionDir();
+    this.scheduleDreamTimer();
     logInfo('engine.created', {
       sessionId: this.session.id,
       service: this.service.constructor.name,
@@ -98,6 +108,8 @@ export class QueryEngine {
 
   /** 处理用户输入（在独立 Worker 线程中执行） */
   async handleQuery(userInput: string, callbacks: EngineCallbacks): Promise<void> {
+    this.touchActivity();
+    this.isQueryRunning = true;
     const previousTranscriptLength = this.transcript.length;
     logInfo('query.received', {
       sessionId: this.session.id,
@@ -113,13 +125,8 @@ export class QueryEngine {
     };
     callbacks.onMessage(userMsg);
     this.session.messages.push(userMsg);
-
-    if (this.transcript.length === 0) {
-      const updated = await updateUserProfileFromInput(userInput);
-      if (updated) {
-        this.service = this.createService();
-      }
-    }
+    const includeUserProfile = shouldIncludeUserProfile(userInput);
+    this.scheduleUserProfileUpdate(userInput);
 
     // 将回调包装后传给 WorkerBridge，Worker 事件会映射回这里
     const bridgeCallbacks: EngineCallbacks = {
@@ -150,6 +157,7 @@ export class QueryEngine {
         userInput,
         this.transcript,
         bridgeCallbacks,
+        { includeUserProfile },
       );
       const recentTranscript = this.transcript.slice(previousTranscriptLength);
       this.schedulePersistentMemoryUpdate(userInput, recentTranscript);
@@ -168,6 +176,9 @@ export class QueryEngine {
         timestamp: Date.now(),
       };
       callbacks.onMessage(errMsg);
+    } finally {
+      this.isQueryRunning = false;
+      this.scheduleDreamTimer();
     }
 
     this.session.updatedAt = Date.now();
@@ -188,6 +199,9 @@ export class QueryEngine {
     this.session = this.createSession();
     this.transcript = [];
     this.memoryUpdateQueue = Promise.resolve();
+    this.userProfileUpdateQueue = Promise.resolve();
+    this.dreamUpdateQueue = Promise.resolve();
+    this.touchActivity();
     clearAuthorizations();
   }
 
@@ -207,6 +221,9 @@ export class QueryEngine {
     this.session = this.createSession();
     this.transcript = [];
     this.memoryUpdateQueue = Promise.resolve();
+    this.userProfileUpdateQueue = Promise.resolve();
+    this.dreamUpdateQueue = Promise.resolve();
+    this.touchActivity();
     logInfo('agent.switch.completed', {
       sessionId: this.session.id,
       agentName,
@@ -248,6 +265,70 @@ export class QueryEngine {
           userInput,
           recentTranscript,
         });
+      });
+  }
+
+  private scheduleUserProfileUpdate(userInput: string) {
+    if (!userInput.trim()) return;
+
+    this.userProfileUpdateQueue = this.userProfileUpdateQueue
+      .catch(() => {})
+      .then(async () => {
+        await updateUserProfileFromInput(userInput);
+      });
+  }
+
+  private touchActivity() {
+    this.lastActivityAt = Date.now();
+    this.scheduleDreamTimer();
+  }
+
+  private scheduleDreamTimer() {
+    if (this.dreamTimer) {
+      clearTimeout(this.dreamTimer);
+      this.dreamTimer = null;
+    }
+
+    const delay = DREAM_IDLE_MIN_MS + Math.floor(Math.random() * DREAM_IDLE_JITTER_MS);
+    this.dreamTimer = setTimeout(() => {
+      void this.runDreamCycle();
+    }, delay);
+  }
+
+  private async runDreamCycle() {
+    const idleMs = Date.now() - this.lastActivityAt;
+    if (this.isQueryRunning || idleMs < DREAM_IDLE_MIN_MS) {
+      this.scheduleDreamTimer();
+      return;
+    }
+
+    const sessionSnapshot = {
+      ...this.session,
+      messages: [...this.session.messages],
+    };
+    const transcriptSnapshot = [...this.transcript];
+    if (transcriptSnapshot.length === 0) {
+      this.scheduleDreamTimer();
+      return;
+    }
+
+    this.dreamUpdateQueue = this.dreamUpdateQueue
+      .catch(() => {})
+      .then(async () => {
+        logInfo('dream.idle_triggered', {
+          sessionId: sessionSnapshot.id,
+          idleMs,
+          transcriptLength: transcriptSnapshot.length,
+        });
+        await updateDreamFromSession({
+          session: sessionSnapshot,
+          transcript: transcriptSnapshot,
+        });
+      })
+      .finally(() => {
+        if (!this.isQueryRunning && Date.now() - this.lastActivityAt >= DREAM_IDLE_MIN_MS) {
+          this.scheduleDreamTimer();
+        }
       });
   }
 
@@ -325,6 +406,7 @@ export class QueryEngine {
         messageCount: cleanedMessages.length,
         transcriptLength: this.transcript.length,
       });
+      this.touchActivity();
       return { session: this.session, messages: cleanedMessages };
     } catch (error) {
       logError('session.load_failed', error, { sessionId });

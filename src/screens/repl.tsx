@@ -23,6 +23,8 @@ import { HIDE_WELCOME_AFTER_INPUT } from '../config/constants.js';
 import { generateAgentHint } from '../core/hint.js';
 import { subscribeAgentCount, getActiveAgentCount } from '../core/spawnRegistry.js';
 import { logError, logInfo, logWarn } from '../core/logger.js';
+import { getAgentSubCommands } from '../commands/index.js';
+import { setActiveAgent } from '../config/agentState.js';
 
 export default function REPL() {
   const { exit } = useApp();
@@ -245,39 +247,50 @@ export default function REPL() {
           return;
         }
 
+        // /agent
+        if (cmdName === 'agent') {
+          if (hasArgs) {
+            const agentName = parts.slice(1).join(' ').trim().toLowerCase();
+            const targetAgent = getAgentSubCommands().find((cmd) => cmd.name === agentName);
+            setInput('');
+            slashMenu.setSlashMenuVisible(false);
+
+            if (!targetAgent) {
+              const errMsg: Message = {
+                id: `agent-not-found-${Date.now()}`,
+                type: 'error',
+                status: 'error',
+                content: `未找到智能体: ${agentName}`,
+                timestamp: Date.now(),
+              };
+              setMessages((prev) => [...prev, errMsg]);
+              return;
+            }
+
+            setActiveAgent(targetAgent.name);
+            const switchMsg: Message = {
+              id: `switch-${Date.now()}`,
+              type: 'system',
+              status: 'success',
+              content: `已切换智能体为 ${targetAgent.name}，请重启以生效（Ctrl+C 两次退出后重新启动）`,
+              timestamp: Date.now(),
+            };
+            setMessages((prev) => [...prev, switchMsg]);
+          } else {
+            slashMenu.openListCommand('agent');
+          }
+          return;
+        }
+
         // /resume
         if (cmdName === 'resume') {
-          setInput('');
-          slashMenu.setSlashMenuVisible(false);
           if (hasArgs && engineRef.current) {
+            setInput('');
+            slashMenu.setSlashMenuVisible(false);
             const sessionId = parts.slice(1).join(' ').trim();
             slashMenu.resumeSession(sessionId);
           } else {
-            const sessions = QueryEngine.listSessions().slice(0, 20);
-            if (sessions.length === 0) {
-              const noMsg: Message = {
-                id: `resume-empty-${Date.now()}`,
-                type: 'system',
-                status: 'success',
-                content: '暂无历史会话',
-                timestamp: Date.now(),
-              };
-              setMessages((prev) => [...prev, noMsg]);
-            } else {
-              const lines = sessions.map((s, i) => {
-                const date = new Date(s.updatedAt);
-                const dateStr = `${date.getMonth() + 1}/${date.getDate()} ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
-                return `  ${i + 1}. [${dateStr}] ${s.summary}\n     ID: ${s.id}`;
-              });
-              const listMsg: Message = {
-                id: `resume-list-${Date.now()}`,
-                type: 'system',
-                status: 'success',
-                content: `历史会话（最近 ${sessions.length} 条）:\n\n${lines.join('\n\n')}\n\n使用 /resume <ID> 恢复指定会话`,
-                timestamp: Date.now(),
-              };
-              setMessages((prev) => [...prev, listMsg]);
-            }
+            slashMenu.openListCommand('resume');
           }
           return;
         }
@@ -292,7 +305,7 @@ export default function REPL() {
       clearStream();
       await engineRef.current.handleQuery(trimmed, callbacks);
     },
-    [isProcessing, pushHistory, clearStream, resetTokens, slashMenu, handleNewSession],
+    [isProcessing, pushHistory, clearStream, slashMenu, handleNewSession],
   );
 
   // ===== 输入处理 =====
@@ -311,6 +324,32 @@ export default function REPL() {
     setInput(val);
     slashMenu.updateSlashMenu(val);
   }, [resetNavigation, slashMenu]);
+
+  const handleSlashMenuAutocomplete = useCallback(() => {
+    slashMenu.autocompleteSlashMenuSelection(input);
+  }, [slashMenu, input]);
+
+  const handleSlashMenuSubmit = useCallback(async () => {
+    const selected = slashMenu.getSelectedCommand();
+    if (!selected) return;
+
+    const completed = slashMenu.autocompleteSlashMenuSelection(input);
+    if (selected.submitMode === 'context') {
+      const parts = completed.trim().slice(1).split(/\s+/);
+      const hasArgs = parts.length > 1 && parts.slice(1).join('').length > 0;
+      if (!hasArgs) return;
+    }
+
+    await handleSubmit(completed);
+  }, [slashMenu, input, handleSubmit]);
+
+  const handleEditorSubmit = useCallback(async (value: string) => {
+    if (slashMenu.slashMenuVisible) {
+      await handleSlashMenuSubmit();
+      return;
+    }
+    await handleSubmit(value);
+  }, [slashMenu.slashMenuVisible, handleSlashMenuSubmit, handleSubmit]);
 
   // Tab 填入 placeholder
   const handleTabFillPlaceholder = useCallback(() => {
@@ -378,7 +417,6 @@ export default function REPL() {
       if (key.ctrl && ch === 'o') { setShowDetails((prev) => !prev); return; }
       return; // 丢弃其他所有按键
     }
-    if (key.tab && slashMenu.slashMenuVisible) { slashMenu.handleSlashMenuSelect(); return; }
     if (key.ctrl && ch === 'c') { handleCtrlC(); return; }
     if (key.ctrl && ch === 'o') { setShowDetails((prev) => !prev); return; }
     if (key.ctrl && ch === 'l') {
@@ -474,7 +512,7 @@ export default function REPL() {
               <MultilineInput
                 value={input}
                 onChange={handleInputChange}
-                onSubmit={handleSubmit}
+                onSubmit={handleEditorSubmit}
                 onUpArrow={handleUpArrow}
                 onDownArrow={handleDownArrow}
                 placeholder={placeholder}
@@ -483,7 +521,7 @@ export default function REPL() {
                 slashMenuActive={slashMenu.slashMenuVisible}
                 onSlashMenuUp={slashMenu.handleSlashMenuUp}
                 onSlashMenuDown={slashMenu.handleSlashMenuDown}
-                onSlashMenuSelect={slashMenu.handleSlashMenuSelect}
+                onSlashMenuSelect={handleSlashMenuAutocomplete}
                 onSlashMenuClose={slashMenu.handleSlashMenuClose}
                 onTabFillPlaceholder={handleTabFillPlaceholder}
               />

@@ -40,6 +40,11 @@ function WelcomeHeader({ width }: { width: number }) {
         <Text color="gray"></Text>
       </Box>
 
+      {/* 欢迎词 */}
+      <Box marginTop={1}>
+        <Text color="green">欢迎使用 Jarvis，请直接输入你的问题或需求。</Text>
+      </Box>
+
       {/* 分隔线 */}
       <Box marginTop={1}>
         <Text color="gray">{'─'.repeat(Math.min(width - 4, 48))}</Text>

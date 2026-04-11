@@ -109,6 +109,10 @@ export interface QueryCallbacks {
   onSubAgentUpdateMessage?: (id: string, updates: Partial<Message>) => void;
 }
 
+interface QueryOptions {
+  includeUserProfile?: boolean;
+}
+
 /**
  * 单轮 Agentic Loop：推理 → 工具调用 → 循环
  */
@@ -119,6 +123,7 @@ export async function executeQuery(
   service: LLMService,
   callbacks: QueryCallbacks,
   abortSignal: { aborted: boolean },
+  options?: QueryOptions,
 ): Promise<TranscriptMessage[]> {
   logInfo('agent_loop.start', {
     inputLength: userInput.length,
@@ -143,7 +148,14 @@ export async function executeQuery(
     });
     callbacks.onLoopStateChange({ ...loopState });
 
-    const result = await runOneIteration(compressTranscript(localTranscript), _tools, service, callbacks, abortSignal);
+    const result = await runOneIteration(
+      compressTranscript(localTranscript),
+      _tools,
+      service,
+      callbacks,
+      abortSignal,
+      options,
+    );
     logInfo('agent_loop.iteration.result', {
       iteration: loopState.iteration,
       textLength: result.text.length,
@@ -242,6 +254,7 @@ async function runOneIteration(
   service: LLMService,
   callbacks: QueryCallbacks,
   abortSignal: { aborted: boolean },
+  options?: QueryOptions,
 ): Promise<{ text: string; toolCalls: ToolCallInfo[]; duration: number; tokenCount: number; firstTokenLatency: number; tokensPerSecond: number }> {
   const startTime = Date.now();
   let accumulatedText = '';
@@ -300,7 +313,7 @@ async function runOneIteration(
         },
         onComplete: () => safeResolve(),
         onError: (err) => reject(err),
-      }, abortSignal)
+      }, abortSignal, options)
       .catch(reject);
   });
 

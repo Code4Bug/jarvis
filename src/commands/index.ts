@@ -12,29 +12,31 @@ export interface SlashCommand {
   description: string;
   /** 命令类别 */
   category: 'agent' | 'tool' | 'builtin';
+  /** 回车行为：直接执行 / 弹出列表 / 作为上下文提交 */
+  submitMode: 'action' | 'list' | 'context';
 }
 
 /** 内置命令 */
 const builtinCommands: SlashCommand[] = [
-  { name: 'init', description: '初始化项目信息，生成 JARVIS.md', category: 'builtin' },
-  { name: 'new', description: '开启新会话，重新初始化上下文', category: 'builtin' },
-  { name: 'resume', description: '恢复历史会话上下文', category: 'builtin' },
-  { name: 'help', description: '显示帮助信息', category: 'builtin' },
-  { name: 'agent', description: '切换智能体', category: 'builtin' },
-  { name: 'permissions', description: '查看所有持久化授权列表', category: 'builtin' },
-  { name: 'skills', description: '查看当前所有 tools 和 skills', category: 'builtin' },
-  { name: 'session_clear', description: '清理所有非当前会话的历史记录', category: 'builtin' },
-  { name: 'version', description: '显示当前版本号', category: 'builtin' },
+  { name: 'init', description: '初始化项目信息，生成 JARVIS.md', category: 'builtin', submitMode: 'action' },
+  { name: 'new', description: '开启新会话，重新初始化上下文', category: 'builtin', submitMode: 'action' },
+  { name: 'resume', description: '恢复历史会话上下文', category: 'builtin', submitMode: 'list' },
+  { name: 'help', description: '显示帮助信息', category: 'builtin', submitMode: 'action' },
+  { name: 'agent', description: '切换智能体', category: 'builtin', submitMode: 'list' },
+  { name: 'permissions', description: '查看所有持久化授权列表', category: 'builtin', submitMode: 'action' },
+  { name: 'skills', description: '查看当前所有 tools 和 skills', category: 'builtin', submitMode: 'action' },
+  { name: 'session_clear', description: '清理所有非当前会话的历史记录', category: 'builtin', submitMode: 'action' },
+  { name: 'version', description: '显示当前版本号', category: 'builtin', submitMode: 'action' },
 ];
 
 /** 工具命令 */
 const toolCommands: SlashCommand[] = [
-  { name: 'read', description: '读取指定文件内容', category: 'tool' },
-  { name: 'write', description: '写入内容到文件', category: 'tool' },
-  { name: 'bash', description: '执行 Bash 命令', category: 'tool' },
-  { name: 'ls', description: '列出目录文件', category: 'tool' },
-  { name: 'search', description: '搜索文件内容', category: 'tool' },
-  { name: 'create_skill', description: '创建新的 Skill 到 ~/.jarvis/skills/', category: 'builtin' },
+  { name: 'read', description: '读取指定文件内容', category: 'tool', submitMode: 'context' },
+  { name: 'write', description: '写入内容到文件', category: 'tool', submitMode: 'context' },
+  { name: 'bash', description: '执行 Bash 命令', category: 'tool', submitMode: 'context' },
+  { name: 'ls', description: '列出目录文件', category: 'tool', submitMode: 'context' },
+  { name: 'search', description: '搜索文件内容', category: 'tool', submitMode: 'context' },
+  { name: 'create_skill', description: '创建新的 Skill 到 ~/.jarvis/skills/', category: 'builtin', submitMode: 'context' },
 ];
 
 /** 智能体子命令：从 agents 目录动态加载（二级菜单） */
@@ -52,6 +54,7 @@ export function getAgentSubCommands(): SlashCommand[] {
       name: agent.meta.name.toLowerCase(),
       description: agent.meta.description,
       category: 'agent',
+      submitMode: 'action',
     });
   }
   _agentSubCommands = cmds;
@@ -72,6 +75,7 @@ function getTopCommands(): SlashCommand[] {
       name: s.meta.name,
       description: `[Skill] ${s.meta.description || s.meta.name}`,
       category: 'tool' as const,
+      submitMode: 'context' as const,
     }));
 
   _topCommands = [...builtinCommands, ...toolCommands, ...skillCommands];

@@ -9,6 +9,7 @@ export class MockService implements LLMService {
     _tools: Tool[],
     callbacks: StreamCallbacks,
     abortSignal?: AppAbortSignal,
+    _options?: { includeUserProfile?: boolean },
   ): Promise<void> {
     const lastMsg = transcript[transcript.length - 1];
     const userText =

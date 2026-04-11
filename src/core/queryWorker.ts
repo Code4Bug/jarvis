@@ -20,7 +20,7 @@ logInfo('query_worker.ready');
 // ===== 消息类型定义 =====
 
 export type WorkerInbound =
-  | { type: 'run'; userInput: string; transcript: TranscriptMessage[] }
+  | { type: 'run'; userInput: string; transcript: TranscriptMessage[]; options?: { includeUserProfile?: boolean } }
   | { type: 'abort' }
   | { type: 'danger_confirm_result'; requestId: string; choice: DangerConfirmResult }
   // MessageBus IPC 回复（主线程 → queryWorker）
@@ -150,6 +150,7 @@ parentPort.on('message', async (msg: WorkerInbound) => {
         service,
         callbacks,
         abortSignal,
+        msg.options,
       );
       logInfo('query_worker.run.done', {
         transcriptLength: newTranscript.length,
