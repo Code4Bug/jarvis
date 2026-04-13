@@ -72,7 +72,9 @@ function WelcomeHeader({ width }: { width: number }) {
         <Text color="gray">/</Text><Text color="cyan">new</Text>
         <Text color="gray"> 新会话  </Text>
         <Text color="gray">/</Text><Text color="cyan">agent</Text>
-        <Text color="gray"> 切换</Text>
+        <Text color="gray"> 切换  </Text>
+        <Text color="yellow" bold>?</Text>
+        <Text color="gray"> 快捷键提示</Text>
       </Box>
 
       <Text>{' '}</Text>

@@ -18,6 +18,7 @@ export interface Message {
   status: MessageStatus;
   content: string;
   timestamp: number;
+  systemKind?: 'shortcut_help';
   /** 耗时 ms */
   duration?: number;
   /** token 统计 */

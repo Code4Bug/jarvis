@@ -3,6 +3,7 @@ import { Box, Text } from 'ink';
 import Spinner from 'ink-spinner';
 import { Message, MessageStatus, MessageType } from '../types/index.js';
 import MarkdownText from './MarkdownText.js';
+import ShortcutHelpMessage from './ShortcutHelpMessage.js';
 
 // 状态圆点 icon，根据消息类型 + 状态决定颜色
 // reasoning 完成 → 白色 / tool_exec 成功 → 绿色 / error → 红色 / aborted → 黄色 / pending → 黄色
@@ -186,7 +187,11 @@ function MessageItem({ msg, showDetails = false }: { msg: Message; showDetails?:
         <Box flexDirection="row" alignItems="flex-start">
           <Text color={dotColor}>{dot} </Text>
           <Box flexDirection="column" flexShrink={1}>
-            <MarkdownText text={msg.content} color="gray" />
+            {msg.systemKind === 'shortcut_help' ? (
+              <ShortcutHelpMessage />
+            ) : (
+              <MarkdownText text={msg.content} color="gray" />
+            )}
           </Box>
         </Box>
         <MessageStats msg={msg} show={showDetails} />

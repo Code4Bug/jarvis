@@ -1,10 +1,12 @@
 import React, { useMemo } from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text, useStdout } from 'ink';
 import { Marked } from 'marked';
 // @ts-ignore — marked-terminal 无内置类型声明
 import { markedTerminal } from 'marked-terminal';
 // @ts-ignore
 import Table from 'cli-table3';
+// @ts-ignore — wrap-ansi 无显式类型声明
+import wrapAnsi from 'wrap-ansi';
 
 // ===== ANSI 颜色常量 =====
 const RESET = '\x1b[0m';
@@ -189,6 +191,35 @@ function renderMarkdown(text: string): string {
   }
 }
 
+function wrapRenderedLine(line: string, width: number): string[] {
+  if (!line) return [''];
+
+  const safeWidth = Math.max(width, 12);
+  const plainLine = stripAnsi(line);
+  const listPrefixMatch = plainLine.match(/^(\s*(?:[*+-]|\d+\.)\s+)/);
+
+  if (!listPrefixMatch) {
+    return wrapAnsi(line, safeWidth, {
+      hard: true,
+      trim: false,
+      wordWrap: false,
+    }).split('\n');
+  }
+
+  const prefix = listPrefixMatch[1];
+  const content = line.slice(prefix.length);
+  const contentWidth = Math.max(safeWidth - prefix.length, 8);
+  const wrappedContent = wrapAnsi(content, contentWidth, {
+    hard: true,
+    trim: false,
+    wordWrap: false,
+  }).split('\n');
+
+  return wrappedContent.map((segment, index) => (
+    `${index === 0 ? prefix : ' '.repeat(prefix.length)}${segment}`
+  ));
+}
+
 /**
  * Markdown 终端渲染组件
  * 支持表格（动态列宽+自动换行）、代码块（深色背景+边框）、加粗、列表等
@@ -199,16 +230,21 @@ function renderMarkdown(text: string): string {
  * 与 ANSI 转义序列冲突，出现光标错位和输出错乱。
  */
 function MarkdownText({ text, color }: { text: string; color?: string }) {
+  const { stdout } = useStdout();
+
   const lines = useMemo(() => {
     const rendered = renderMarkdown(text);
-    return rendered.split('\n');
-  }, [text]);
+    const availableWidth = Math.max(Math.min(stdout?.columns ?? 80, 100) - 6, 20);
+    return rendered
+      .split('\n')
+      .flatMap((line) => wrapRenderedLine(line, availableWidth));
+  }, [text, stdout]);
 
   return (
     <Box flexDirection="column">
       {lines.map((line, i) => (
-        <Text key={i} wrap="wrap" color={color}>
-          {line}
+        <Text key={i} color={color}>
+          {line || ' '}
         </Text>
       ))}
     </Box>

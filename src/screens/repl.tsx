@@ -21,6 +21,7 @@ import { subscribeAgentCount, getActiveAgentCount } from '../core/spawnRegistry.
 import { logError, logInfo, logWarn } from '../core/logger.js';
 import { getAgentSubCommands } from '../commands/index.js';
 import { setActiveAgent } from '../config/agentState.js';
+import { buildShortcutHelpText } from '../config/shortcuts.js';
 import { hideTerminalCursor, showTerminalCursor } from '../terminal/cursor.js';
 
 export default function REPL() {
@@ -233,6 +234,23 @@ export default function REPL() {
     async (value: string) => {
       const trimmed = value.trim();
       if (!trimmed || isProcessing || !engineRef.current) return;
+
+      if (trimmed === '?') {
+        setInput('');
+        slashMenu.setSlashMenuVisible(false);
+        if (HIDE_WELCOME_AFTER_INPUT) setShowWelcome(false);
+        setMessages((prev) => [...prev, {
+          id: `shortcut-help-${Date.now()}`,
+          type: 'system',
+          status: 'success',
+          systemKind: 'shortcut_help',
+          content: buildShortcutHelpText(),
+          timestamp: Date.now(),
+        }]);
+        logInfo('ui.shortcut_help.open');
+        return;
+      }
+
       logInfo('ui.submit', {
         inputLength: trimmed.length,
         isSlashCommand: trimmed.startsWith('/'),
