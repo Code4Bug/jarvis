@@ -91,3 +91,17 @@ export function getAppName(): string {
     return 'Jarvis';
   }
 }
+
+/** 启动欢迎词，跟随当前激活智能体与本机用户名 */
+export function getStartupWelcomeMessage(): string {
+  const agentName = getAppName();
+  const userName = os.userInfo().username || '朋友';
+  const templates = [
+    `${agentName}：欢迎你，${userName}。我已经准备好了，输入 /help 查看命令，输入 ? 查看快捷键。`,
+    `${agentName}：你好，${userName}。今天想先处理什么？输入 /help 看命令，输入 ? 看快捷键。`,
+    `${agentName}：${userName}，欢迎回来。需要我继续当前工作，还是开启一个新任务？`,
+    `${agentName}：已就绪，${userName}。你可以直接描述需求，也可以先用 /help 或 ? 看可用操作。`,
+    `${agentName}：见到你了，${userName}。命令在 /help，快捷键在 ?，我们可以直接开始。`,
+  ];
+  return templates[Math.floor(Math.random() * templates.length)];
+}

@@ -15,7 +15,7 @@ import { executeSlashCommand } from './slashCommands.js';
 import { Message, LoopState, Session } from '../types/index.js';
 import { QueryEngine, EngineCallbacks } from '../core/QueryEngine.js';
 import { DangerConfirmResult } from '../core/query.js';
-import { HIDE_WELCOME_AFTER_INPUT } from '../config/constants.js';
+import { HIDE_WELCOME_AFTER_INPUT, getStartupWelcomeMessage } from '../config/constants.js';
 import { generateAgentHint } from '../core/hint.js';
 import { subscribeAgentCount, getActiveAgentCount } from '../core/spawnRegistry.js';
 import { logError, logInfo, logWarn } from '../core/logger.js';
@@ -160,6 +160,13 @@ export default function REPL() {
       logError('ui.hint.init_failed', err);
       console.error('[hint] 初始化提示失败:', err);
     });
+    setMessages((prev) => (prev.length > 0 ? prev : [{
+      id: `startup-welcome-${Date.now()}`,
+      type: 'system',
+      status: 'success',
+      content: getStartupWelcomeMessage(),
+      timestamp: Date.now(),
+    }]));
     logInfo('ui.repl.mounted');
     return () => {
       logInfo('ui.repl.unmounted');
