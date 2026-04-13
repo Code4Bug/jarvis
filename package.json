@@ -1,6 +1,6 @@
 {
   "name": "@code4bug/jarvis-agent",
-  "version": "1.3.5",
+  "version": "1.3.7",
   "description": "基于 React + TypeScript + Ink 构建的命令行智能体交互界面",
   "type": "module",
   "main": "dist/index.js",

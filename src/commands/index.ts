@@ -8,6 +8,8 @@
 export interface SlashCommand {
   /** 命令名称（不含 /） */
   name: string;
+  /** 可选：菜单展示名 */
+  displayName?: string;
   /** 简短描述 */
   description: string;
   /** 命令类别 */
@@ -24,6 +26,7 @@ const builtinCommands: SlashCommand[] = [
   { name: 'quit', description: '退出应用程序', category: 'builtin', submitMode: 'action' },
   { name: 'bye', description: '退出应用程序', category: 'builtin', submitMode: 'action' },
   { name: 'resume', description: '恢复历史会话上下文', category: 'builtin', submitMode: 'list' },
+  { name: 'rewind', description: '回退当前会话到指定提问位置', category: 'builtin', submitMode: 'list' },
   { name: 'help', description: '显示帮助信息', category: 'builtin', submitMode: 'action' },
   { name: 'agent', description: '切换智能体', category: 'builtin', submitMode: 'list' },
   { name: 'permissions', description: '查看所有持久化授权列表', category: 'builtin', submitMode: 'action' },

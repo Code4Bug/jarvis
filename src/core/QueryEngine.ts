@@ -85,6 +85,40 @@ export class QueryEngine {
     };
   }
 
+  private rebuildTranscriptFromMessages(messages: Message[]): TranscriptMessage[] {
+    const transcript: TranscriptMessage[] = [];
+    for (const msg of messages) {
+      if (msg.type === 'user') {
+        transcript.push({ role: 'user', content: msg.content });
+      } else if (msg.type === 'reasoning' && msg.status === 'success' && msg.content) {
+        transcript.push({
+          role: 'assistant',
+          content: [{ type: 'text', text: msg.content }],
+        });
+      } else if (msg.type === 'tool_exec' && msg.toolName && msg.toolResult !== undefined) {
+        transcript.push({
+          role: 'assistant',
+          content: [{ type: 'tool_use', id: msg.id, name: msg.toolName, input: msg.toolArgs ?? {} }],
+        });
+        transcript.push({
+          role: 'tool_result',
+          content: msg.toolResult,
+          toolUseId: msg.id,
+        });
+      }
+    }
+    return transcript;
+  }
+
+  private recomputeSessionSummary(messages: Message[]): string | undefined {
+    const firstUser = messages.find((m) => m.type === 'user');
+    return firstUser ? firstUser.content.slice(0, 80).replace(/\n/g, ' ') : undefined;
+  }
+
+  private recomputeSessionTokens(messages: Message[]): number {
+    return messages.reduce((sum, msg) => sum + (msg.tokenCount ?? 0), 0);
+  }
+
   private ensureSessionDir() {
     if (!fs.existsSync(SESSIONS_DIR)) {
       fs.mkdirSync(SESSIONS_DIR, { recursive: true });
@@ -377,29 +411,7 @@ export class QueryEngine {
       );
       this.session.messages = cleanedMessages;
       // 从历史消息重建 transcript
-      this.transcript = [];
-      for (const msg of loaded.messages) {
-        if (msg.type === 'user') {
-          this.transcript.push({ role: 'user', content: msg.content });
-        } else if (msg.type === 'reasoning' && msg.status === 'success' && msg.content) {
-          // assistant 消息的 content 必须是 ContentBlock[]，与 query.ts 中的构建方式一致
-          this.transcript.push({
-            role: 'assistant',
-            content: [{ type: 'text', text: msg.content }],
-          });
-        } else if (msg.type === 'tool_exec' && msg.toolName && msg.toolResult !== undefined) {
-          // 工具调用：assistant tool_use + tool_result
-          this.transcript.push({
-            role: 'assistant',
-            content: [{ type: 'tool_use', id: msg.id, name: msg.toolName, input: msg.toolArgs ?? {} }],
-          });
-          this.transcript.push({
-            role: 'tool_result',
-            content: msg.toolResult,
-            toolUseId: msg.id,
-          });
-        }
-      }
+      this.transcript = this.rebuildTranscriptFromMessages(cleanedMessages);
 
       logInfo('session.loaded', {
         sessionId,
@@ -416,6 +428,81 @@ export class QueryEngine {
 
   getSession(): Session {
     return this.session;
+  }
+
+  getCurrentSessionUserTurns(): Array<{
+    messageId: string;
+    turnIndex: number;
+    input: string;
+    answerPreview: string;
+    timestamp: number;
+  }> {
+    const cleanedMessages = this.session.messages.filter(
+      (m) => !(m.type === 'thinking' && m.status === 'pending'),
+    );
+    const userMessages = cleanedMessages.filter((m) => m.type === 'user');
+
+    return userMessages.map((msg, index) => {
+      const currentIndex = cleanedMessages.findIndex((item) => item.id === msg.id);
+      const nextUserIndex = cleanedMessages.findIndex(
+        (item, i) => i > currentIndex && item.type === 'user',
+      );
+      const endIndex = nextUserIndex >= 0 ? nextUserIndex : cleanedMessages.length;
+      const answerPreview = cleanedMessages
+        .slice(currentIndex + 1, endIndex)
+        .filter((item) => item.type === 'reasoning' && item.content)
+        .map((item) => item.content.trim())
+        .find(Boolean) ?? '';
+
+      return {
+        messageId: msg.id,
+        turnIndex: index + 1,
+        input: msg.content,
+        answerPreview,
+        timestamp: msg.timestamp,
+      };
+    });
+  }
+
+  rewindToUserMessage(messageId: string): {
+    session: Session;
+    messages: Message[];
+    input: string;
+    turnIndex: number;
+  } | null {
+    const cleanedMessages = this.session.messages.filter(
+      (m) => !(m.type === 'thinking' && m.status === 'pending'),
+    );
+    const targetIndex = cleanedMessages.findIndex((m) => m.id === messageId && m.type === 'user');
+    if (targetIndex < 0) return null;
+
+    const userTurns = cleanedMessages.filter((m) => m.type === 'user');
+    const turnIndex = userTurns.findIndex((m) => m.id === messageId) + 1;
+    const targetMessage = cleanedMessages[targetIndex];
+    const keptMessages = cleanedMessages.slice(0, targetIndex);
+
+    this.session.messages = keptMessages;
+    this.session.summary = this.recomputeSessionSummary(keptMessages);
+    this.session.totalTokens = this.recomputeSessionTokens(keptMessages);
+    this.session.updatedAt = Date.now();
+    this.transcript = this.rebuildTranscriptFromMessages(keptMessages);
+    this.touchActivity();
+    this.saveSession();
+
+    logInfo('session.rewind', {
+      sessionId: this.session.id,
+      targetMessageId: messageId,
+      turnIndex,
+      keptMessageCount: keptMessages.length,
+      transcriptLength: this.transcript.length,
+    });
+
+    return {
+      session: this.session,
+      messages: keptMessages,
+      input: targetMessage.content,
+      turnIndex,
+    };
   }
 
   /**

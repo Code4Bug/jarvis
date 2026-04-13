@@ -296,6 +296,50 @@ export default function REPL() {
           return;
         }
 
+        // /rewind
+        if (cmdName === 'rewind') {
+          if (hasArgs && engineRef.current) {
+            setInput('');
+            slashMenu.setSlashMenuVisible(false);
+            const messageId = parts.slice(1).join(' ').trim();
+            const result = engineRef.current.rewindToUserMessage(messageId);
+            if (!result) {
+              const errMsg: Message = {
+                id: `rewind-err-${Date.now()}`,
+                type: 'error',
+                status: 'error',
+                content: '未找到要回退的会话位置',
+                timestamp: Date.now(),
+              };
+              setMessages((prev) => [...prev, errMsg]);
+              return;
+            }
+
+            stopAll();
+            setMessages([
+              ...result.messages,
+              {
+                id: `rewind-${Date.now()}`,
+                type: 'system',
+                status: 'success',
+                content: `已回退到当前会话的第 ${result.turnIndex} 条提问，请确认后重新发送。`,
+                timestamp: Date.now(),
+              },
+            ]);
+            sessionRef.current = result.session;
+            tokenCountRef.current = result.session.totalTokens;
+            syncTokenDisplay(result.session.totalTokens);
+            setLoopState(null);
+            setIsProcessing(false);
+            setShowWelcome(false);
+            resetNavigation();
+            setInput(result.input);
+          } else {
+            slashMenu.openListCommand('rewind');
+          }
+          return;
+        }
+
         // /create_skill
         if (cmdName === 'create_skill') {
           setInput('');

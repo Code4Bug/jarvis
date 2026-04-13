@@ -36,6 +36,7 @@ export function useSlashMenu(opts: UseSlashMenuOptions) {
   const [slashMenuIndex, setSlashMenuIndex] = useState(0);
   const [agentMenuMode, setAgentMenuMode] = useState(false);
   const [resumeMenuMode, setResumeMenuMode] = useState(false);
+  const [rewindMenuMode, setRewindMenuMode] = useState(false);
 
   // 上移
   const handleSlashMenuUp = useCallback(() => {
@@ -49,9 +50,10 @@ export function useSlashMenu(opts: UseSlashMenuOptions) {
 
   // 关闭
   const handleSlashMenuClose = useCallback(() => {
-    if (agentMenuMode || resumeMenuMode) {
+    if (agentMenuMode || resumeMenuMode || rewindMenuMode) {
       setAgentMenuMode(false);
       setResumeMenuMode(false);
+      setRewindMenuMode(false);
       setInput('/');
       const matched = filterCommands('');
       setSlashMenuItems(matched);
@@ -60,7 +62,7 @@ export function useSlashMenu(opts: UseSlashMenuOptions) {
     } else {
       setSlashMenuVisible(false);
     }
-  }, [agentMenuMode, resumeMenuMode, setInput]);
+  }, [agentMenuMode, resumeMenuMode, rewindMenuMode, setInput]);
 
   // 恢复会话的通用逻辑
   const resumeSession = useCallback((sessionId: string) => {
@@ -101,7 +103,26 @@ export function useSlashMenu(opts: UseSlashMenuOptions) {
     return slashMenuItems[slashMenuIndex] ?? null;
   }, [slashMenuItems, slashMenuIndex]);
 
-  const openListCommand = useCallback((commandName: 'agent' | 'resume') => {
+  const buildRewindItems = useCallback((): SlashCommand[] => {
+    if (!engineRef.current) return [];
+    return engineRef.current.getCurrentSessionUserTurns()
+      .slice()
+      .map((turn) => {
+        const date = new Date(turn.timestamp);
+        const dateStr = `${date.getMonth() + 1}/${date.getDate()} ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+        const question = turn.input.replace(/\s+/g, ' ').slice(0, 32);
+        const answer = turn.answerPreview.replace(/\s+/g, ' ').slice(0, 24);
+        return {
+          name: turn.messageId,
+          displayName: `rewind-${turn.turnIndex}`,
+          description: `[Q${turn.turnIndex} ${dateStr}] ${question}${answer ? ` ｜ A: ${answer}` : ''}`,
+          category: 'builtin' as const,
+          submitMode: 'action' as const,
+        };
+      });
+  }, [engineRef]);
+
+  const openListCommand = useCallback((commandName: 'agent' | 'resume' | 'rewind') => {
     if (commandName === 'agent') {
       setInput('/agent ');
       const matched = filterAgentCommands('');
@@ -109,8 +130,21 @@ export function useSlashMenu(opts: UseSlashMenuOptions) {
       setSlashMenuIndex(0);
       setAgentMenuMode(true);
       setResumeMenuMode(false);
+      setRewindMenuMode(false);
       setSlashMenuVisible(matched.length > 0);
       return '/agent ';
+    }
+
+    if (commandName === 'rewind') {
+      const items = buildRewindItems();
+      setInput('/rewind ');
+      setSlashMenuItems(items);
+      setSlashMenuIndex(0);
+      setSlashMenuVisible(items.length > 0);
+      setRewindMenuMode(true);
+      setResumeMenuMode(false);
+      setAgentMenuMode(false);
+      return '/rewind ';
     }
 
     const sessions = QueryEngine.listSessions().slice(0, 20);
@@ -130,8 +164,9 @@ export function useSlashMenu(opts: UseSlashMenuOptions) {
     setSlashMenuVisible(items.length > 0);
     setResumeMenuMode(true);
     setAgentMenuMode(false);
+    setRewindMenuMode(false);
     return '/resume ';
-  }, [setInput]);
+  }, [setInput, buildRewindItems]);
 
   const autocompleteSlashMenuSelection = useCallback((currentInput: string) => {
     const cmd = getSelectedCommand();
@@ -153,6 +188,13 @@ export function useSlashMenu(opts: UseSlashMenuOptions) {
       return nextInput;
     }
 
+    if (rewindMenuMode) {
+      const nextInput = `/rewind ${cmd.name}`;
+      setInput(nextInput);
+      setSlashMenuVisible(false);
+      return nextInput;
+    }
+
     const match = currentInput.match(/^\/\S*/);
     const suffix = match ? currentInput.slice(match[0].length) : '';
     const needsTrailingSpace = !suffix && (cmd.submitMode === 'context' || cmd.submitMode === 'list');
@@ -160,13 +202,13 @@ export function useSlashMenu(opts: UseSlashMenuOptions) {
 
     setInput(nextInput);
 
-    if (cmd.submitMode === 'list' && (cmd.name === 'agent' || cmd.name === 'resume') && !suffix.trim()) {
+    if (cmd.submitMode === 'list' && (cmd.name === 'agent' || cmd.name === 'resume' || cmd.name === 'rewind') && !suffix.trim()) {
       return openListCommand(cmd.name);
     }
 
     updateSlashMenu(nextInput);
     return nextInput;
-  }, [agentMenuMode, resumeMenuMode, getSelectedCommand, setInput, openListCommand]);
+  }, [agentMenuMode, resumeMenuMode, rewindMenuMode, getSelectedCommand, setInput, openListCommand]);
 
   // 输入变化时更新菜单
   const updateSlashMenu = useCallback((val: string) => {
@@ -207,6 +249,23 @@ export function useSlashMenu(opts: UseSlashMenuOptions) {
         setSlashMenuVisible(matched.length > 0);
         setResumeMenuMode(true);
         setAgentMenuMode(false);
+        setRewindMenuMode(false);
+        return;
+      }
+
+      // /rewind 二级菜单
+      if (/^rewind\s/i.test(query)) {
+        const subQuery = query.replace(/^rewind\s*/i, '').toLowerCase();
+        const items = buildRewindItems();
+        const matched = subQuery
+          ? items.filter((i) => i.name.includes(subQuery) || (i.displayName ?? '').toLowerCase().includes(subQuery) || i.description.toLowerCase().includes(subQuery))
+          : items;
+        setSlashMenuItems(matched);
+        setSlashMenuIndex(0);
+        setSlashMenuVisible(matched.length > 0);
+        setRewindMenuMode(true);
+        setResumeMenuMode(false);
+        setAgentMenuMode(false);
         return;
       }
 
@@ -217,12 +276,14 @@ export function useSlashMenu(opts: UseSlashMenuOptions) {
       setSlashMenuVisible(matched.length > 0);
       setAgentMenuMode(false);
       setResumeMenuMode(false);
+      setRewindMenuMode(false);
     } else {
       setSlashMenuVisible(false);
       setAgentMenuMode(false);
       setResumeMenuMode(false);
+      setRewindMenuMode(false);
     }
-  }, []);
+  }, [buildRewindItems]);
 
   return {
     slashMenuVisible,
@@ -230,6 +291,7 @@ export function useSlashMenu(opts: UseSlashMenuOptions) {
     slashMenuIndex,
     agentMenuMode,
     resumeMenuMode,
+    rewindMenuMode,
     handleSlashMenuUp,
     handleSlashMenuDown,
     handleSlashMenuClose,

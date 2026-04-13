@@ -62,11 +62,12 @@ function SlashCommandMenu({
         const isSelected = realIndex === selectedIndex;
         const catColor = categoryColor[cmd.category] ?? 'gray';
         const catText = categoryLabel[cmd.category] ?? cmd.category;
+        const displayName = cmd.displayName ?? cmd.name;
 
         return (
-          <Box key={cmd.name}>
+          <Box key={`${cmd.name}-${realIndex}`}>
             <Text color={isSelected ? 'cyan' : 'white'}>
-              {' '}/{cmd.name}{' '}
+              {' '}/{displayName}{' '}
             </Text>
             <Text color={isSelected ? 'cyan' : 'gray'}>
               - {cmd.description}{' '}

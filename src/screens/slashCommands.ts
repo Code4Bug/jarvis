@@ -37,6 +37,7 @@ export async function executeSlashCommand(cmdName: string): Promise<Message | nu
         '  /bye         退出应用程序',
         '  /resume      恢复历史会话（支持二级菜单选择）',
         '  /resume <ID> 直接恢复指定会话',
+        '  /rewind      回退当前会话到指定提问位置',
         '  /help        显示此帮助信息',
         '  /session_clear 清理所有非当前会话的历史记录',
         '  /skills      查看当前所有 tools 和 skills',
