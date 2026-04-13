@@ -20,6 +20,9 @@ export interface SlashCommand {
 const builtinCommands: SlashCommand[] = [
   { name: 'init', description: '初始化项目信息，生成 JARVIS.md', category: 'builtin', submitMode: 'action' },
   { name: 'new', description: '开启新会话，重新初始化上下文', category: 'builtin', submitMode: 'action' },
+  { name: 'exit', description: '退出应用程序', category: 'builtin', submitMode: 'action' },
+  { name: 'quit', description: '退出应用程序', category: 'builtin', submitMode: 'action' },
+  { name: 'bye', description: '退出应用程序', category: 'builtin', submitMode: 'action' },
   { name: 'resume', description: '恢复历史会话上下文', category: 'builtin', submitMode: 'list' },
   { name: 'help', description: '显示帮助信息', category: 'builtin', submitMode: 'action' },
   { name: 'agent', description: '切换智能体', category: 'builtin', submitMode: 'list' },

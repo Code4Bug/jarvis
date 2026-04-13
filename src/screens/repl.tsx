@@ -243,6 +243,13 @@ export default function REPL() {
         const cmdName = parts[0].toLowerCase();
         const hasArgs = parts.length > 1 && parts.slice(1).join('').length > 0;
 
+        if (['exit', 'quit', 'bye'].includes(cmdName)) {
+          setInput('');
+          slashMenu.setSlashMenuVisible(false);
+          handleExit();
+          return;
+        }
+
         // 内置命令
         if (['new', 'help', 'init', 'session_clear', 'permissions', 'skills', 'version'].includes(cmdName)) {
           setInput('');
@@ -355,7 +362,7 @@ export default function REPL() {
       abortRequestedRef.current = false;
       await engineRef.current.handleQuery(trimmed, callbacks);
     },
-    [isProcessing, pushHistory, clearStream, slashMenu, handleNewSession],
+    [isProcessing, pushHistory, clearStream, slashMenu, handleNewSession, handleExit],
   );
 
   // ===== 输入处理 =====
