@@ -25,15 +25,11 @@ const OPTIONS: { key: ConfirmChoice; label: string; color: string }[] = [
   { key: 'cancel', label: '取消执行',                                     color: 'red' },
 ];
 
-// 圆角边框字符
-const BORDER = { tl: '╭', tr: '╮', bl: '╰', br: '╯', h: '─', v: '│' };
-
 export default function DangerConfirm({ command, reason, ruleName, onSelect }: DangerConfirmProps) {
   const [selectedIndex, setSelectedIndex] = useState(2); // 默认选中「取消」，最安全
   const { stdout } = useStdout();
-  const cols = Math.min(stdout?.columns ?? 80, 80);
-  // 内容区宽度 = 总宽度 - 左右边框(2) - 左右 padding(2)
-  const innerWidth = cols - 4;
+  const cols = Math.min(stdout?.columns ?? 80, 84);
+  const contentWidth = Math.max(32, cols - 8);
 
   useInput((_input, key) => {
     if (key.upArrow) {
@@ -47,50 +43,56 @@ export default function DangerConfirm({ command, reason, ruleName, onSelect }: D
     }
   });
 
-  const hLine = BORDER.h.repeat(cols - 2);
-  const topBorder = BORDER.tl + hLine + BORDER.tr;
-  const bottomBorder = BORDER.bl + hLine + BORDER.br;
-
-  /** 渲染一行带左右边框的内容 */
-  const row = (children: React.ReactNode) => (
-    <Box>
-      <Text color="yellow">{BORDER.v} </Text>
-      <Box width={innerWidth}>
-        {children}
+  const section = (label: string, value: React.ReactNode) => (
+    <Box flexDirection="column" marginTop={1}>
+      <Text color="gray">{label}</Text>
+      <Box width={contentWidth} marginTop={0}>
+        {value}
       </Box>
-      <Text color="yellow"> {BORDER.v}</Text>
     </Box>
   );
 
-  const emptyRow = row(<Text> </Text>);
-
   return (
-    <Box flexDirection="column" marginY={1}>
-      <Text color="yellow">{topBorder}</Text>
+    <Box flexDirection="column" marginY={1} paddingX={1}>
+      <Box flexDirection="column">
+        <Text backgroundColor="yellow" color="black" bold>
+          {' 安全围栏 '}
+        </Text>
+        <Box marginTop={1} flexDirection="column">
+          <Text bold color="white">检测到高风险命令</Text>
+          <Text color="gray">请确认是否继续执行</Text>
+        </Box>
+      </Box>
 
-      {row(<Text color="yellow" bold>安全围栏拦截</Text>)}
-      {emptyRow}
-      {row(<Text color="gray">命令: <Text color="white" bold>{command}</Text></Text>)}
-      {row(<Text color="gray">规则: <Text color="cyan">{ruleName}</Text></Text>)}
-      {row(<Text color="red">{reason}</Text>)}
-      {emptyRow}
-      {row(<Text color="gray" dimColor>使用 ↑↓ 选择，Enter 确认，ESC 取消:</Text>)}
-      {emptyRow}
+      {section('命令', <Text color="white" bold wrap="truncate-end">{command}</Text>)}
+      {section('规则', <Text color="cyan">{ruleName}</Text>)}
+      {section('原因', <Text color="red">{reason}</Text>)}
+
+      <Box marginTop={2}>
+        <Text color="gray" dimColor>使用 ↑↓ 选择，Enter 确认，ESC 取消</Text>
+      </Box>
+
+      <Box flexDirection="column" marginTop={1}>
       {OPTIONS.map((opt, i) => {
         const isSelected = i === selectedIndex;
-        const prefix = isSelected ? '❯ ' : '  ';
+        const prefix = isSelected ? '›' : ' ';
+        const textColor = isSelected ? 'black' : opt.color;
+        const backgroundColor = isSelected
+          ? (opt.color === 'yellow' ? 'yellow' : opt.color === 'green' ? 'green' : 'red')
+          : undefined;
         return (
-          <React.Fragment key={opt.key}>
-            {row(
-              <Text color={isSelected ? opt.color : 'gray'} bold={isSelected}>
-                {prefix}{opt.label}
-              </Text>
-            )}
-          </React.Fragment>
+          <Box key={opt.key} marginTop={i === 0 ? 0 : 1}>
+            <Text
+              color={textColor}
+              backgroundColor={backgroundColor}
+              bold={isSelected}
+            >
+              {` ${prefix} ${opt.label} `}
+            </Text>
+          </Box>
         );
       })}
-
-      <Text color="yellow">{bottomBorder}</Text>
+      </Box>
     </Box>
   );
 }
