@@ -128,6 +128,7 @@ jarvis --version
 | 命令 | 说明 |
 | --- | --- |
 | `/init` | 扫描当前项目并生成 `JARVIS.md` |
+| `/about` | 查看 Jarvis 的详细特性、功能与信息 |
 | `/new` | 开启新会话 |
 | `/resume` | 恢复历史会话 |
 | `/resume <ID>` | 直接恢复指定历史会话 |

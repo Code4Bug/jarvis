@@ -28,10 +28,22 @@ export default function REPL() {
   const { exit } = useApp();
   const width = useTerminalWidth();
   const windowFocused = useWindowFocus();
+  const buildExitHint = useCallback(() => {
+    const sessionId = sessionRef.current.id?.trim();
+    if (!sessionId) return '';
+    const separatorWidth = Math.max(process.stdout.columns ?? 0, 80);
+    const separator = '─'.repeat(separatorWidth);
+    return `\n${separator}\n\nResume this session with:\njarvis --resume ${sessionId}\n\n`;
+  }, []);
   const handleExit = useCallback(() => {
+    const exitHint = buildExitHint();
     exit();
-    setTimeout(() => process.exit(0), 50);
-  }, [exit]);
+    setTimeout(() => {
+      showTerminalCursor();
+      if (exitHint) process.stdout.write(exitHint);
+      process.exit(0);
+    }, 50);
+  }, [buildExitHint, exit]);
   const { countdown, handleCtrlC } = useDoubleCtrlCExit(handleExit);
   const { pushHistory, navigateUp, navigateDown, resetNavigation } = useInputHistory();
 
