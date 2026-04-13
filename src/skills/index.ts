@@ -14,7 +14,7 @@ import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { Tool } from '../types/index.js';
-import { SkillDefinition, scanExternalSkills, getExternalSkillsDir } from './loader.js';
+import { SkillDefinition, scanExternalSkills } from './loader.js';
 import { allTools as builtinTools } from '../tools/index.js';
 
 // ===== 缓存 =====
@@ -223,7 +223,6 @@ function skillToTool(skill: SkillDefinition): Tool {
 export function loadExternalSkills(): SkillDefinition[] {
   if (_skillCache) return _skillCache;
   _skillCache = scanExternalSkills();
-  console.log(`[skills] 已加载 ${_skillCache.length} 个外部 skill (${getExternalSkillsDir()})`);
   return _skillCache;
 }
 

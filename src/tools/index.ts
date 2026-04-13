@@ -39,6 +39,7 @@ export function findTool(name: string): Tool | undefined {
 // ===== 合并工具（内置 + 外部 Skills）=====
 
 import { getMergedTools, findMergedTool } from '../skills/index.js';
+import { listSkills } from '../skills/index.js';
 
 /** 获取所有工具（内置 + 外部 skills），供 QueryEngine 使用 */
 export function getAllTools(): Tool[] {
@@ -48,4 +49,9 @@ export function getAllTools(): Tool[] {
 /** 按名称查找工具（内置 + 外部 skills） */
 export function findToolMerged(name: string): Tool | undefined {
   return findMergedTool(name);
+}
+
+/** 获取状态栏用的工具统计摘要 */
+export function getToolStatsText(): string {
+  return `skills（${allTools.length}/${listSkills().length}）`;
 }

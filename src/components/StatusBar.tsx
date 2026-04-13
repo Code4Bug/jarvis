@@ -1,11 +1,19 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { PROJECT_NAME, getContextTokenLimit, getModelName, isThinkingModeToggleEnabled } from '../config/constants.js';
+import { getToolStatsText } from '../tools/index.js';
 
 interface StatusBarProps {
   width: number;
   totalTokens: number;
   activeAgents?: number;
+}
+
+function truncateText(text: string, maxChars: number): string {
+  if (maxChars <= 0) return '';
+  if (text.length <= maxChars) return text;
+  if (maxChars === 1) return '…';
+  return `${text.slice(0, maxChars - 1)}…`;
 }
 
 /** 生成 token 用量进度条 */
@@ -22,7 +30,8 @@ function StatusBar({ width, totalTokens, activeAgents = 0 }: StatusBarProps) {
   const modelName = getModelName();
   const contextTokenLimit = getContextTokenLimit();
   const thinkingModeToggleEnabled = isThinkingModeToggleEnabled();
-  const left = ` ${modelName} │ ${PROJECT_NAME}`;
+  const toolStats = getToolStatsText();
+  const rawLeft = ` ${modelName} │ ${PROJECT_NAME} │ ${toolStats}`;
 
   // 右侧：智能体数量（有后台 Agent 时显示）+ token 进度条 + 思考模式切换（可选）
   const agentPart = activeAgents > 0 ? `⬡ ${activeAgents} agent${activeAgents > 1 ? 's' : ''} │ ` : '';
@@ -32,6 +41,8 @@ function StatusBar({ width, totalTokens, activeAgents = 0 }: StatusBarProps) {
   const effortPart = thinkingModeToggleEnabled ? ' │ ● medium · /effort' : '';
   // 右侧完整文本长度（用于计算间距）
   const rightLen = agentPart.length + tokenLabel.length + 1 + barWidth + effortPart.length + 1;
+  const leftMaxWidth = Math.max(width - rightLen - 1, 1);
+  const left = truncateText(rawLeft, leftMaxWidth);
   const gap = Math.max(width - left.length - rightLen, 1);
 
   return (
