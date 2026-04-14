@@ -6,11 +6,12 @@ interface FooterPaneProps {
   width: number;
   tokenCountRef: React.MutableRefObject<number>;
   activeAgents: number;
+  sessionStartedAt?: number;
 }
 
 const TOKEN_REFRESH_INTERVAL = 100;
 
-function FooterPane({ width, tokenCountRef, activeAgents }: FooterPaneProps) {
+function FooterPane({ width, tokenCountRef, activeAgents, sessionStartedAt }: FooterPaneProps) {
   const [displayTokens, setDisplayTokens] = useState(() => tokenCountRef.current);
 
   useEffect(() => {
@@ -31,7 +32,12 @@ function FooterPane({ width, tokenCountRef, activeAgents }: FooterPaneProps) {
   return (
     <Box flexDirection="column" paddingX={1}>
       <Text color="gray">{'─'.repeat(Math.max(width - 2, 1))}</Text>
-      <StatusBar width={width - 2} totalTokens={displayTokens} activeAgents={activeAgents} />
+      <StatusBar
+        width={width - 2}
+        totalTokens={displayTokens}
+        activeAgents={activeAgents}
+        sessionStartedAt={sessionStartedAt}
+      />
     </Box>
   );
 }

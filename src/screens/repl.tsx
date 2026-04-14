@@ -59,6 +59,7 @@ export default function REPL({ initialResumeSessionId }: REPLProps) {
   const [showDetails, setShowDetails] = useState(false);
   const [placeholder, setPlaceholder] = useState('');
   const [activeAgents, setActiveAgents] = useState(getActiveAgentCount());
+  const [sessionStartedAt, setSessionStartedAt] = useState(0);
   const lastEscRef = useRef<number>(0);
   const abortRequestedRef = useRef(false);
   const lastAbortNoticeRef = useRef(0);
@@ -133,6 +134,7 @@ export default function REPL({ initialResumeSessionId }: REPLProps) {
     if (engineRef.current) {
       engineRef.current.reset();
       sessionRef.current = engineRef.current.getSession();
+      setSessionStartedAt(sessionRef.current.createdAt);
     }
     setMessages([]);
     clearStream();
@@ -165,6 +167,7 @@ export default function REPL({ initialResumeSessionId }: REPLProps) {
   useEffect(() => {
     engineRef.current = new QueryEngine();
     sessionRef.current = engineRef.current.getSession();
+    setSessionStartedAt(sessionRef.current.createdAt);
     // 注册持久 UI 回调，供 spawn_agent 后台子 Agent 跨轮次推送消息
     engineRef.current.registerUIBus(
       (msg) => setMessages((prev) => [...prev, msg]),
@@ -206,6 +209,7 @@ export default function REPL({ initialResumeSessionId }: REPLProps) {
         },
       ]);
       sessionRef.current = result.session;
+      setSessionStartedAt(result.session.createdAt);
       tokenCountRef.current = result.session.totalTokens;
       syncTokenDisplay(result.session.totalTokens);
       setLoopState(null);
@@ -275,6 +279,7 @@ export default function REPL({ initialResumeSessionId }: REPLProps) {
     onSessionUpdate: (s) => {
       sessionRef.current = s;
       tokenCountRef.current = s.totalTokens;
+      setSessionStartedAt((prev) => (prev === s.createdAt ? prev : s.createdAt));
     },
     onConfirmDangerousCommand: (command, reason, ruleName) => {
       return new Promise<DangerConfirmResult>((resolve) => {
@@ -389,6 +394,7 @@ export default function REPL({ initialResumeSessionId }: REPLProps) {
               },
             ]);
             sessionRef.current = result.session;
+            setSessionStartedAt(result.session.createdAt);
             tokenCountRef.current = result.session.totalTokens;
             syncTokenDisplay(result.session.totalTokens);
             setLoopState(null);
@@ -596,6 +602,7 @@ export default function REPL({ initialResumeSessionId }: REPLProps) {
       if (engineRef.current) {
         engineRef.current.reset();
         sessionRef.current = engineRef.current.getSession();
+        setSessionStartedAt(sessionRef.current.createdAt);
       }
       setMessages([]);
       clearStream();
@@ -667,7 +674,12 @@ export default function REPL({ initialResumeSessionId }: REPLProps) {
         onTabFillPlaceholder={handleTabFillPlaceholder}
       />
 
-      <FooterPane width={width} tokenCountRef={tokenCountRef} activeAgents={activeAgents} />
+      <FooterPane
+        width={width}
+        tokenCountRef={tokenCountRef}
+        activeAgents={activeAgents}
+        sessionStartedAt={sessionStartedAt}
+      />
     </Box>
   );
 }
