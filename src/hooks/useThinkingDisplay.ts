@@ -1,25 +1,20 @@
 import { useSyncExternalStore } from 'react';
 
-/**
- * Token 显示 store。
- *
- * REPL 侧只负责写入，底栏通过订阅单独刷新，避免把整棵渲染树带着重绘。
- */
-let tokenDisplayValue = 0;
+let thinkingDisplayValue = '';
 const listeners = new Set<() => void>();
 
 function emitChange() {
   listeners.forEach((listener) => listener());
 }
 
-export function setTokenDisplay(count: number) {
-  if (tokenDisplayValue === count) return;
-  tokenDisplayValue = count;
+export function setThinkingDisplay(text: string) {
+  if (thinkingDisplayValue === text) return;
+  thinkingDisplayValue = text;
   emitChange();
 }
 
-export function resetTokenDisplay() {
-  setTokenDisplay(0);
+export function resetThinkingDisplay() {
+  setThinkingDisplay('');
 }
 
 function subscribe(listener: () => void) {
@@ -30,9 +25,9 @@ function subscribe(listener: () => void) {
 }
 
 function getSnapshot() {
-  return tokenDisplayValue;
+  return thinkingDisplayValue;
 }
 
-export function useTokenDisplay() {
+export function useThinkingDisplay() {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }

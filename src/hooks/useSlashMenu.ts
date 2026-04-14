@@ -6,9 +6,8 @@ import { filterCommands, filterAgentCommands, SlashCommand } from '../commands/i
 interface UseSlashMenuOptions {
   engineRef: React.RefObject<QueryEngine | null>;
   sessionRef: React.MutableRefObject<import('../types/index.js').Session>;
-  tokenCountRef: React.MutableRefObject<number>;
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
-  setDisplayTokens: (n: number) => void;
+  setTokenDisplay: (n: number) => void;
   setLoopState: React.Dispatch<React.SetStateAction<import('../types/index.js').LoopState | null>>;
   setIsProcessing: React.Dispatch<React.SetStateAction<boolean>>;
   setShowWelcome: React.Dispatch<React.SetStateAction<boolean>>;
@@ -26,8 +25,8 @@ interface UseSlashMenuOptions {
  */
 export function useSlashMenu(opts: UseSlashMenuOptions) {
   const {
-    engineRef, sessionRef, tokenCountRef,
-    setMessages, setDisplayTokens,
+    engineRef, sessionRef,
+    setMessages, setTokenDisplay,
     setLoopState, setIsProcessing, setShowWelcome, setInput, stopAll,
   } = opts;
 
@@ -73,8 +72,7 @@ export function useSlashMenu(opts: UseSlashMenuOptions) {
       stopAll();
       setMessages(result.messages);
       sessionRef.current = result.session;
-      tokenCountRef.current = result.session.totalTokens;
-      setDisplayTokens(result.session.totalTokens);
+      setTokenDisplay(result.session.totalTokens);
       setLoopState(null);
       setIsProcessing(false);
       setShowWelcome(false);
@@ -96,7 +94,7 @@ export function useSlashMenu(opts: UseSlashMenuOptions) {
       };
       setMessages((prev) => [...prev, errMsg]);
     }
-  }, [engineRef, sessionRef, tokenCountRef, setMessages, setDisplayTokens, stopAll, setLoopState, setIsProcessing, setShowWelcome]);
+  }, [engineRef, sessionRef, setMessages, setTokenDisplay, stopAll, setLoopState, setIsProcessing, setShowWelcome]);
 
   const getSelectedCommand = useCallback((): SlashCommand | null => {
     if (slashMenuItems.length === 0) return null;

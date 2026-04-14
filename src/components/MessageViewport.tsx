@@ -4,6 +4,7 @@ import Spinner from 'ink-spinner';
 import DangerConfirm, { ConfirmChoice } from './DangerConfirm.js';
 import MessageList from './MessageList.js';
 import StreamingDraft from './StreamingDraft.js';
+import ThinkingDraft from './ThinkingDraft.js';
 import { LoopState, Message } from '../types/index.js';
 import { DangerConfirmResult } from '../core/query.js';
 
@@ -16,7 +17,6 @@ interface DangerConfirmState {
 
 interface MessageViewportProps {
   messages: Message[];
-  streamText: string;
   showDetails: boolean;
   dangerConfirm: DangerConfirmState | null;
   loopState: LoopState | null;
@@ -25,7 +25,6 @@ interface MessageViewportProps {
 
 function MessageViewport({
   messages,
-  streamText,
   showDetails,
   dangerConfirm,
   loopState,
@@ -34,7 +33,9 @@ function MessageViewport({
   return (
     <Box flexDirection="column" paddingX={1}>
       <MessageList messages={messages} showDetails={showDetails} />
-      {streamText && <StreamingDraft text={streamText} />}
+      {/* ThinkingDraft / StreamingDraft 各自订阅外部 store，不依赖父级 props */}
+      <ThinkingDraft />
+      <StreamingDraft />
       {dangerConfirm && (
         <DangerConfirm
           command={dangerConfirm.command}

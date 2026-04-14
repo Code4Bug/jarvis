@@ -1,19 +1,20 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useCallback, useRef, useEffect } from 'react';
 import { Message } from '../types/index.js';
+import { resetThinkingDisplay, setThinkingDisplay } from './useThinkingDisplay.js';
+import { appendStreamDisplay, resetStreamDisplay } from './useStreamDisplay.js';
 
-const STREAM_FLUSH_INTERVAL = 80; // ms
+const STREAM_FLUSH_INTERVAL = 150; // ms — markdown 渲染比纯文本重，适当降频
 const THINKING_FLUSH_INTERVAL = 100; // ms
 
 /**
  * 流式文本 + thinking 文本节流 hook
  *
- * 用 ref 积累 chunk，定时刷新到 state，减少 re-render 频率。
+ * 用 ref 积累 chunk，定时刷新到外部 store，减少 re-render 频率。
+ * streamText 已迁移至 useStreamDisplay 外部 store，REPL 不再持有该 state。
  */
 export function useStreamThrottle(
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>,
 ) {
-  const [streamText, setStreamText] = useState('');
-
   // 流式文本节流
   const streamBufferRef = useRef('');
   const streamTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -22,6 +23,7 @@ export function useStreamThrottle(
   const thinkingBufferRef = useRef('');
   const thinkingIdRef = useRef<string | null>(null);
   const thinkingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastThinkingFlushRef = useRef('');
 
   // 启动流式文本节流定时器
   const startStreamTimer = useCallback(() => {
@@ -30,7 +32,7 @@ export function useStreamThrottle(
       if (streamBufferRef.current) {
         const buf = streamBufferRef.current;
         streamBufferRef.current = '';
-        setStreamText((prev) => prev + buf);
+        appendStreamDisplay(buf);
       }
     }, STREAM_FLUSH_INTERVAL);
   }, []);
@@ -43,7 +45,7 @@ export function useStreamThrottle(
     if (streamBufferRef.current) {
       const buf = streamBufferRef.current;
       streamBufferRef.current = '';
-      setStreamText((prev) => prev + buf);
+      appendStreamDisplay(buf);
     }
   }, []);
 
@@ -51,29 +53,25 @@ export function useStreamThrottle(
   const startThinkingTimer = useCallback(() => {
     if (thinkingTimerRef.current) return;
     thinkingTimerRef.current = setInterval(() => {
-      const id = thinkingIdRef.current;
       const buf = thinkingBufferRef.current;
-      if (id && buf) {
-        setMessages((prev) =>
-          prev.map((msg) => (msg.id === id ? { ...msg, content: buf } : msg)),
-        );
+      if (buf && buf !== lastThinkingFlushRef.current) {
+        lastThinkingFlushRef.current = buf;
+        setThinkingDisplay(buf);
       }
     }, THINKING_FLUSH_INTERVAL);
-  }, [setMessages]);
+  }, []);
 
   const stopThinkingTimer = useCallback(() => {
     if (thinkingTimerRef.current) {
       clearInterval(thinkingTimerRef.current);
       thinkingTimerRef.current = null;
     }
-    const id = thinkingIdRef.current;
     const buf = thinkingBufferRef.current;
-    if (id && buf) {
-      setMessages((prev) =>
-        prev.map((msg) => (msg.id === id ? { ...msg, content: buf } : msg)),
-      );
+    if (buf && buf !== lastThinkingFlushRef.current) {
+      lastThinkingFlushRef.current = buf;
+      setThinkingDisplay(buf);
     }
-  }, [setMessages]);
+  }, []);
 
   /** 追加流式文本到 buffer（不直接 setState） */
   const appendStreamChunk = useCallback((text: string) => {
@@ -83,7 +81,7 @@ export function useStreamThrottle(
   /** 清空流式文本（每轮迭代结束时调用） */
   const clearStream = useCallback(() => {
     streamBufferRef.current = '';
-    setStreamText('');
+    resetStreamDisplay();
   }, []);
 
   /** 处理 thinking 消息的 content 更新 */
@@ -102,6 +100,8 @@ export function useStreamThrottle(
     stopThinkingTimer();
     thinkingIdRef.current = null;
     thinkingBufferRef.current = '';
+    lastThinkingFlushRef.current = '';
+    resetThinkingDisplay();
   }, [stopThinkingTimer]);
 
   /** 全部停止（loop 结束时调用） */
@@ -110,8 +110,10 @@ export function useStreamThrottle(
     stopThinkingTimer();
     thinkingIdRef.current = null;
     thinkingBufferRef.current = '';
+    lastThinkingFlushRef.current = '';
     streamBufferRef.current = '';
-    setStreamText('');
+    resetStreamDisplay();
+    resetThinkingDisplay();
   }, [stopStreamTimer, stopThinkingTimer]);
 
   // 组件卸载时清理
@@ -121,7 +123,6 @@ export function useStreamThrottle(
   }, []);
 
   return {
-    streamText,
     streamBufferRef,
     startStreamTimer,
     stopStreamTimer,

@@ -231,14 +231,16 @@ function wrapRenderedLine(line: string, width: number): string[] {
  */
 function MarkdownText({ text, color }: { text: string; color?: string }) {
   const { stdout } = useStdout();
+  // 只依赖列数数值，避免 stdout 对象引用变化导致 useMemo 每次失效
+  const columns = stdout?.columns ?? 80;
 
   const lines = useMemo(() => {
     const rendered = renderMarkdown(text);
-    const availableWidth = Math.max(Math.min(stdout?.columns ?? 80, 100) - 6, 20);
+    const availableWidth = Math.max(Math.min(columns, 100) - 6, 20);
     return rendered
       .split('\n')
       .flatMap((line) => wrapRenderedLine(line, availableWidth));
-  }, [text, stdout]);
+  }, [text, columns]);
 
   return (
     <Box flexDirection="column">

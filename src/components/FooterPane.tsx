@@ -1,33 +1,16 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { Box, Text } from 'ink';
 import StatusBar from './StatusBar.js';
+import { useTokenDisplay } from '../hooks/useTokenDisplay.js';
+import { useSessionStartDisplay } from '../hooks/useSessionStartDisplay.js';
 
 interface FooterPaneProps {
   width: number;
-  tokenCountRef: React.MutableRefObject<number>;
   activeAgents: number;
-  sessionStartedAt?: number;
 }
-
-const TOKEN_REFRESH_INTERVAL = 100;
-
-function FooterPane({ width, tokenCountRef, activeAgents, sessionStartedAt }: FooterPaneProps) {
-  const [displayTokens, setDisplayTokens] = useState(() => tokenCountRef.current);
-
-  useEffect(() => {
-    setDisplayTokens(tokenCountRef.current);
-
-    const timer = setInterval(() => {
-      setDisplayTokens((prev) => {
-        const next = tokenCountRef.current;
-        return prev === next ? prev : next;
-      });
-    }, TOKEN_REFRESH_INTERVAL);
-
-    return () => {
-      clearInterval(timer);
-    };
-  }, [tokenCountRef]);
+function FooterPane({ width, activeAgents }: FooterPaneProps) {
+  const displayTokens = useTokenDisplay();
+  const sessionStartedAt = useSessionStartDisplay();
 
   return (
     <Box flexDirection="column" paddingX={1}>
@@ -36,7 +19,6 @@ function FooterPane({ width, tokenCountRef, activeAgents, sessionStartedAt }: Fo
         width={width - 2}
         totalTokens={displayTokens}
         activeAgents={activeAgents}
-        sessionStartedAt={sessionStartedAt}
       />
     </Box>
   );

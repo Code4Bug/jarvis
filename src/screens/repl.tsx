@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { Box, useInput, useApp } from 'ink';
+import { Box, Static, useInput, useApp } from 'ink';
 import WelcomeHeader from '../components/WelcomeHeader.js';
 import MessageViewport from '../components/MessageViewport.js';
 import ComposerPane from '../components/ComposerPane.js';
@@ -23,6 +23,8 @@ import { getAgentSubCommands } from '../commands/index.js';
 import { setActiveAgent } from '../config/agentState.js';
 import { buildShortcutHelpText } from '../config/shortcuts.js';
 import { hideTerminalCursor, showTerminalCursor } from '../terminal/cursor.js';
+import { resetTokenDisplay, setTokenDisplay } from '../hooks/useTokenDisplay.js';
+import { resetSessionStartDisplay, setSessionStartDisplay } from '../hooks/useSessionStartDisplay.js';
 
 interface REPLProps {
   initialResumeSessionId?: string;
@@ -59,7 +61,6 @@ export default function REPL({ initialResumeSessionId }: REPLProps) {
   const [showDetails, setShowDetails] = useState(false);
   const [placeholder, setPlaceholder] = useState('');
   const [activeAgents, setActiveAgents] = useState(getActiveAgentCount());
-  const [sessionStartedAt, setSessionStartedAt] = useState(0);
   const lastEscRef = useRef<number>(0);
   const abortRequestedRef = useRef(false);
   const lastAbortNoticeRef = useRef(0);
@@ -68,22 +69,16 @@ export default function REPL({ initialResumeSessionId }: REPLProps) {
     id: '', messages: [], createdAt: 0, updatedAt: 0, totalTokens: 0, totalCost: 0,
   });
   const engineRef = useRef<QueryEngine | null>(null);
-  const tokenCountRef = useRef(0);
 
   // 节流 hooks
   const {
-    streamText, streamBufferRef,
-    startStreamTimer, stopStreamTimer,
+    startStreamTimer,
     appendStreamChunk, clearStream,
     handleThinkingUpdate, finishThinking, thinkingIdRef, stopAll,
   } = useStreamThrottle(setMessages);
 
-  const syncTokenDisplay = useCallback((count: number) => {
-    tokenCountRef.current = count;
-  }, []);
-
   const resetTokens = useCallback(() => {
-    tokenCountRef.current = 0;
+    resetTokenDisplay();
   }, []);
 
   const appendAbortNotice = useCallback(() => {
@@ -134,7 +129,7 @@ export default function REPL({ initialResumeSessionId }: REPLProps) {
     if (engineRef.current) {
       engineRef.current.reset();
       sessionRef.current = engineRef.current.getSession();
-      setSessionStartedAt(sessionRef.current.createdAt);
+      setSessionStartDisplay(sessionRef.current.createdAt);
     }
     setMessages([]);
     clearStream();
@@ -148,9 +143,9 @@ export default function REPL({ initialResumeSessionId }: REPLProps) {
 
   // 斜杠菜单
   const slashMenu = useSlashMenu({
-    engineRef, sessionRef, tokenCountRef,
+    engineRef, sessionRef,
     setMessages,
-    setDisplayTokens: (n: number) => syncTokenDisplay(n),
+    setTokenDisplay,
     setLoopState, setIsProcessing, setShowWelcome, setInput,
     stopAll,
     onNewSession: handleNewSession,
@@ -167,7 +162,7 @@ export default function REPL({ initialResumeSessionId }: REPLProps) {
   useEffect(() => {
     engineRef.current = new QueryEngine();
     sessionRef.current = engineRef.current.getSession();
-    setSessionStartedAt(sessionRef.current.createdAt);
+    setSessionStartDisplay(sessionRef.current.createdAt);
     // 注册持久 UI 回调，供 spawn_agent 后台子 Agent 跨轮次推送消息
     engineRef.current.registerUIBus(
       (msg) => setMessages((prev) => [...prev, msg]),
@@ -209,9 +204,8 @@ export default function REPL({ initialResumeSessionId }: REPLProps) {
         },
       ]);
       sessionRef.current = result.session;
-      setSessionStartedAt(result.session.createdAt);
-      tokenCountRef.current = result.session.totalTokens;
-      syncTokenDisplay(result.session.totalTokens);
+      setSessionStartDisplay(result.session.createdAt);
+      setTokenDisplay(result.session.totalTokens);
       setLoopState(null);
       setIsProcessing(false);
       setShowWelcome(false);
@@ -230,7 +224,7 @@ export default function REPL({ initialResumeSessionId }: REPLProps) {
       timestamp: Date.now(),
     }]);
     logWarn('ui.resume_from_cli.failed', { sessionId: initialResumeSessionId });
-  }, [initialResumeSessionId, stopAll, syncTokenDisplay]);
+  }, [initialResumeSessionId, stopAll]);
 
   // 订阅后台 SubAgent 计数变化
   useEffect(() => {
@@ -278,8 +272,8 @@ export default function REPL({ initialResumeSessionId }: REPLProps) {
     },
     onSessionUpdate: (s) => {
       sessionRef.current = s;
-      tokenCountRef.current = s.totalTokens;
-      setSessionStartedAt((prev) => (prev === s.createdAt ? prev : s.createdAt));
+      setTokenDisplay(s.totalTokens);
+      setSessionStartDisplay(s.createdAt);
     },
     onConfirmDangerousCommand: (command, reason, ruleName) => {
       return new Promise<DangerConfirmResult>((resolve) => {
@@ -394,9 +388,8 @@ export default function REPL({ initialResumeSessionId }: REPLProps) {
               },
             ]);
             sessionRef.current = result.session;
-            setSessionStartedAt(result.session.createdAt);
-            tokenCountRef.current = result.session.totalTokens;
-            syncTokenDisplay(result.session.totalTokens);
+            setSessionStartDisplay(result.session.createdAt);
+            setTokenDisplay(result.session.totalTokens);
             setLoopState(null);
             setIsProcessing(false);
             setShowWelcome(false);
@@ -547,6 +540,12 @@ export default function REPL({ initialResumeSessionId }: REPLProps) {
     }
   }, [placeholder]);
 
+  const handleResolveDangerConfirm = useCallback((choice: ConfirmChoice) => {
+    if (!dangerConfirm) return;
+    dangerConfirm.resolve(choice as DangerConfirmResult);
+    setDangerConfirm(null);
+  }, [dangerConfirm]);
+
   // ===== 隐藏系统默认终端光标，使用 ink 渲染的反色光标代替 =====
   useEffect(() => {
     hideTerminalCursor();
@@ -602,7 +601,7 @@ export default function REPL({ initialResumeSessionId }: REPLProps) {
       if (engineRef.current) {
         engineRef.current.reset();
         sessionRef.current = engineRef.current.getSession();
-        setSessionStartedAt(sessionRef.current.createdAt);
+        setSessionStartDisplay(sessionRef.current.createdAt);
       }
       setMessages([]);
       clearStream();
@@ -634,22 +633,22 @@ export default function REPL({ initialResumeSessionId }: REPLProps) {
   });
 
   // ===== 渲染 =====
+  // welcomeStaticItems: 用稳定 key 控制 Static 只打印一次；新会话时 key 变化触发重新打印
+  const welcomeStaticItems = showWelcome ? [{ key: sessionRef.current.id || 'init', width }] : [];
+
   return (
     <Box flexDirection="column" width={width}>
-      {showWelcome && <WelcomeHeader width={width} />}
+      <Static items={welcomeStaticItems}>
+        {(item) => <WelcomeHeader key={item.key} width={item.width} />}
+      </Static>
 
       <Box marginTop={showWelcome ? 0 : 1}>
         <MessageViewport
           messages={messages}
-          streamText={streamText}
           showDetails={showDetails}
           dangerConfirm={dangerConfirm}
           loopState={loopState}
-          onResolveDangerConfirm={(choice: ConfirmChoice) => {
-            if (!dangerConfirm) return;
-            dangerConfirm.resolve(choice as DangerConfirmResult);
-            setDangerConfirm(null);
-          }}
+          onResolveDangerConfirm={handleResolveDangerConfirm}
         />
       </Box>
 
@@ -676,9 +675,7 @@ export default function REPL({ initialResumeSessionId }: REPLProps) {
 
       <FooterPane
         width={width}
-        tokenCountRef={tokenCountRef}
         activeAgents={activeAgents}
-        sessionStartedAt={sessionStartedAt}
       />
     </Box>
   );

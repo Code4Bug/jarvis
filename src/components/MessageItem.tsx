@@ -55,21 +55,12 @@ function MessageItem({ msg, showDetails = false }: { msg: Message; showDetails?:
   }
 
   if (msg.type === 'thinking' && msg.status === 'pending') {
-    // pending 阶段 thinking 内容存储在 content 字段（由 onThinking 回调实时更新）
-    const thinkContent = msg.content && msg.content !== '思考中...' ? msg.content : '';
     return (
       <Box flexDirection="column">
         <Box>
           <Text color="yellow"><Spinner type="dots" /></Text>
           <Text color="gray"> <Text color={dotColor}>{dot}</Text> Thinking...</Text>
         </Box>
-        {thinkContent ? (
-          <Box marginLeft={2} flexDirection="column">
-            <Text color="gray" dimColor wrap="wrap">
-              {thinkContent.length > 200 ? thinkContent.slice(0, 200) + '...' : thinkContent}
-            </Text>
-          </Box>
-        ) : null}
       </Box>
     );
   }
