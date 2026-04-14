@@ -24,7 +24,11 @@ import { setActiveAgent } from '../config/agentState.js';
 import { buildShortcutHelpText } from '../config/shortcuts.js';
 import { hideTerminalCursor, showTerminalCursor } from '../terminal/cursor.js';
 
-export default function REPL() {
+interface REPLProps {
+  initialResumeSessionId?: string;
+}
+
+export default function REPL({ initialResumeSessionId }: REPLProps) {
   const { exit } = useApp();
   const width = useTerminalWidth();
   const windowFocused = useWindowFocus();
@@ -184,6 +188,45 @@ export default function REPL() {
       logInfo('ui.repl.unmounted');
     };
   }, []);
+
+  useEffect(() => {
+    if (!initialResumeSessionId || !engineRef.current) return;
+
+    const result = engineRef.current.loadSession(initialResumeSessionId);
+    if (result) {
+      stopAll();
+      setMessages([
+        ...result.messages,
+        {
+          id: `resume-cli-${Date.now()}`,
+          type: 'system',
+          status: 'success',
+          content: `已通过启动参数恢复会话 ${initialResumeSessionId.slice(0, 8)}...（${result.messages.length} 条消息）`,
+          timestamp: Date.now(),
+        },
+      ]);
+      sessionRef.current = result.session;
+      tokenCountRef.current = result.session.totalTokens;
+      syncTokenDisplay(result.session.totalTokens);
+      setLoopState(null);
+      setIsProcessing(false);
+      setShowWelcome(false);
+      logInfo('ui.resume_from_cli.success', {
+        sessionId: initialResumeSessionId,
+        messageCount: result.messages.length,
+      });
+      return;
+    }
+
+    setMessages((prev) => [...prev, {
+      id: `resume-cli-error-${Date.now()}`,
+      type: 'error',
+      status: 'error',
+      content: `启动时恢复会话失败：${initialResumeSessionId} 不存在或已损坏`,
+      timestamp: Date.now(),
+    }]);
+    logWarn('ui.resume_from_cli.failed', { sessionId: initialResumeSessionId });
+  }, [initialResumeSessionId, stopAll, syncTokenDisplay]);
 
   // 订阅后台 SubAgent 计数变化
   useEffect(() => {
