@@ -21,7 +21,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 /** 危险命令确认结果 */
-export type DangerConfirmResult = 'once' | 'always' | 'cancel';
+export type DangerConfirmResult = 'once' | 'session' | 'always' | 'cancel';
 
 // ===== Transcript 上下文压缩 =====
 
@@ -706,7 +706,9 @@ async function executeTool(
         }
         // 根据用户选择授权
         if (userChoice === 'once') {
-          authorizeCommand(command, 'once', ruleName);
+          // 当次允许：仅放行当前执行，不写入会话或持久授权
+        } else if (userChoice === 'session') {
+          authorizeCommand(command, 'session', ruleName);
         } else if (userChoice === 'always') {
           authorizeRule(ruleName, 'always');
         }

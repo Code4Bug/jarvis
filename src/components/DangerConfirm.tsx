@@ -1,16 +1,17 @@
 /**
  * 危险命令交互式确认组件
  *
- * 拦截到危险命令时弹出，提供三个选项：
- *   1. 临时执行（仅本次）
- *   2. 持久授权（写入 ~/.jarvis/.permissions.json）
- *   3. 取消执行
+ * 拦截到危险命令时弹出，提供四个选项：
+ *   1. 当次允许（仅执行这一次）
+ *   2. 本轮会话允许（当前 session 内持续生效）
+ *   3. 持久授权（写入 ~/.jarvis/.permissions.json）
+ *   4. 取消执行
  */
 
 import React, { useState } from 'react';
 import { Box, Text, useInput, useStdout } from 'ink';
 
-export type ConfirmChoice = 'once' | 'always' | 'cancel';
+export type ConfirmChoice = 'once' | 'session' | 'always' | 'cancel';
 
 interface DangerConfirmProps {
   command: string;
@@ -20,13 +21,14 @@ interface DangerConfirmProps {
 }
 
 const OPTIONS: { key: ConfirmChoice; label: string; color: string }[] = [
-  { key: 'once',   label: '临时执行（仅本次会话）',                       color: 'yellow' },
-  { key: 'always', label: '持久授权（写入 ~/.jarvis/.permissions.json）', color: 'green' },
-  { key: 'cancel', label: '取消执行',                                     color: 'red' },
+  { key: 'once',    label: '当次允许（仅执行这一次）',                       color: 'yellow' },
+  { key: 'session', label: '本轮会话允许（仅当前 session）',                 color: 'cyan' },
+  { key: 'always',  label: '持久授权（写入 ~/.jarvis/.permissions.json）',   color: 'green' },
+  { key: 'cancel',  label: '取消执行',                                       color: 'red' },
 ];
 
 export default function DangerConfirm({ command, reason, ruleName, onSelect }: DangerConfirmProps) {
-  const [selectedIndex, setSelectedIndex] = useState(2); // 默认选中「取消」，最安全
+  const [selectedIndex, setSelectedIndex] = useState(3); // 默认选中「取消」，最安全
   const { stdout } = useStdout();
   const cols = Math.min(stdout?.columns ?? 80, 84);
   const contentWidth = Math.max(32, cols - 8);
@@ -78,7 +80,13 @@ export default function DangerConfirm({ command, reason, ruleName, onSelect }: D
         const prefix = isSelected ? '›' : ' ';
         const textColor = isSelected ? 'black' : opt.color;
         const backgroundColor = isSelected
-          ? (opt.color === 'yellow' ? 'yellow' : opt.color === 'green' ? 'green' : 'red')
+          ? (opt.color === 'yellow'
+            ? 'yellow'
+            : opt.color === 'cyan'
+              ? 'cyan'
+              : opt.color === 'green'
+                ? 'green'
+                : 'red')
           : undefined;
         return (
           <Box key={opt.key} marginTop={i === 0 ? 0 : 1}>

@@ -2,8 +2,9 @@
  * 统一安全围栏 — 危险命令拦截 + 敏感信息保护 + 双模式授权
  *
  * 授权模式：
- *   1. 临时授权（once）  — 仅当前会话有效，会话重置后失效
- *   2. 持久授权（always）— 写入 ~/.jarvis/.permissions.json，跨会话永久生效
+ *   1. 当次允许（once）   — 仅放行当前这一次执行，不做任何记录
+ *   2. 会话授权（session）— 仅当前会话有效，会话重置后失效
+ *   3. 持久授权（always） — 写入 ~/.jarvis/.permissions.json，跨会话永久生效
  *
  * critical 级别命令不可授权，high 级别支持两种授权模式。
  */
@@ -81,7 +82,7 @@ export const SENSITIVE_PATTERNS: SensitivePattern[] = [
 // ===== 授权类型 =====
 
 /** 授权模式 */
-export type AuthMode = 'once' | 'always';
+export type AuthMode = 'once' | 'session' | 'always';
 
 /** 持久化授权记录 */
 export interface PermissionEntry {
@@ -159,12 +160,15 @@ const sessionAuthorizedRules = new Set<string>();
 /**
  * 授权命令
  * @param command 具体命令字符串
- * @param mode 'once' 仅本次会话 | 'always' 持久化到文件
+ * @param mode 'once' 仅本次执行 | 'session' 仅本次会话 | 'always' 持久化到文件
  * @param ruleName 可选，关联的规则名称
  */
-export function authorizeCommand(command: string, mode: AuthMode = 'once', ruleName?: string): void {
+export function authorizeCommand(command: string, mode: AuthMode = 'session', ruleName?: string): void {
   const trimmed = command.trim();
   if (mode === 'once') {
+    return;
+  }
+  if (mode === 'session') {
     sessionAuthorizedCommands.add(trimmed);
   } else {
     // 持久化写入
@@ -183,10 +187,10 @@ export function authorizeCommand(command: string, mode: AuthMode = 'once', ruleN
 /**
  * 按规则名称授权（整类命令放行）
  * @param ruleName 规则名称（对应 DangerRule.name）
- * @param mode 'once' 仅本次会话 | 'always' 持久化到文件
+ * @param mode 'session' 仅本次会话 | 'always' 持久化到文件
  */
-export function authorizeRule(ruleName: string, mode: AuthMode = 'once'): void {
-  if (mode === 'once') {
+export function authorizeRule(ruleName: string, mode: Exclude<AuthMode, 'once'> = 'session'): void {
+  if (mode === 'session') {
     sessionAuthorizedRules.add(ruleName);
   } else {
     const perms = loadPermissions();
