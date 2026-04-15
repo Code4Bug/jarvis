@@ -208,7 +208,7 @@ export default function REPL({ initialResumeSessionId }: REPLProps) {
       setTokenDisplay(result.session.totalTokens);
       setLoopState(null);
       setIsProcessing(false);
-      setShowWelcome(false);
+      setShowWelcome(true);
       logInfo('ui.resume_from_cli.success', {
         sessionId: initialResumeSessionId,
         messageCount: result.messages.length,

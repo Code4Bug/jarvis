@@ -75,7 +75,7 @@ export function useSlashMenu(opts: UseSlashMenuOptions) {
       setTokenDisplay(result.session.totalTokens);
       setLoopState(null);
       setIsProcessing(false);
-      setShowWelcome(false);
+      setShowWelcome(true);
       const resumeMsg: Message = {
         id: `resume-${Date.now()}`,
         type: 'system',
